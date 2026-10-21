@@ -1,0 +1,11 @@
+{
+  // The Worker's name is passed at deploy time from the CF_WORKER_NAME variable.
+  "compatibility_date": "2026-10-01",
+  "assets": {
+    "directory": "./public"
+  },
+  // Production only: keep the workers.dev address and preview URLs off.
+  // The custom domain is attached in the dashboard and is left untouched by deploys.
+  "workers_dev": false,
+  "preview_urls": false
+}
