@@ -36,6 +36,6 @@ public sealed class CallLogFile(string path)
     }
 
     /// <summary>A limiter that starts from this file and writes every change back to it.</summary>
-    public HourlyCallLimiter CreateLimiter(int maxCallsPerHour, TimeProvider time) =>
-        new(maxCallsPerHour, time, Load(), Save);
+    public HourlyCallLimiter CreateLimiter(int maxCallsPerHour, TimeProvider time, TimeSpan? maxWait = null) =>
+        new(maxCallsPerHour, time, Load(), Save, maxWait);
 }

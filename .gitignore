@@ -480,3 +480,9 @@ $RECYCLE.BIN/
 
 # Vim temporary swap files
 *.swp
+
+# Job state from local runs: rankings.db and the call log live in R2, archived days in B2
+rankings.db
+rankings.db-*
+lpdb-calls.json
+/archive/

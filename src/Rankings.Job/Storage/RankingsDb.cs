@@ -1,3 +1,4 @@
+using System.Globalization;
 using Microsoft.Data.Sqlite;
 using Rankings.Core;
 
@@ -234,6 +235,21 @@ public sealed class RankingsDb : IDisposable
             cmd.ExecuteNonQuery();
         }
         tx.Commit();
+    }
+
+    /// <summary>Season starts from the admin-maintained seasons table, earliest first, at 00:00 UTC.</summary>
+    public List<DateTimeOffset> LoadSeasonStarts()
+    {
+        using var cmd = Connection.CreateCommand();
+        cmd.CommandText = "SELECT starts_on FROM seasons ORDER BY starts_on";
+        using var reader = cmd.ExecuteReader();
+        var seasonStarts = new List<DateTimeOffset>();
+        while (reader.Read())
+        {
+            var startsOn = DateOnly.ParseExact(reader.GetString(0), "yyyy-MM-dd", CultureInfo.InvariantCulture);
+            seasonStarts.Add(new DateTimeOffset(startsOn.ToDateTime(TimeOnly.MinValue), TimeSpan.Zero));
+        }
+        return seasonStarts;
     }
 
     public string? GetState(string key)

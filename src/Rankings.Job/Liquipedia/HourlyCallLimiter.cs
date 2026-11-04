@@ -4,12 +4,15 @@ namespace Rankings.Job.Liquipedia;
 /// Holds calls back so no more than <c>maxCalls</c> start in any one-hour window.
 /// Each run starts on a fresh machine, so pass in the calls saved by earlier runs and
 /// save them again through <c>onChange</c>, which fires before each counted call goes out.
+/// A call that would wait longer than <c>maxWait</c> throws <see cref="LpdbBudgetSpentException"/>
+/// instead, because on GitHub Actions every minute spent waiting is billed; null waits as long as needed.
 /// </summary>
 public sealed class HourlyCallLimiter(
     int maxCalls,
     TimeProvider time,
     IEnumerable<DateTimeOffset>? earlierCalls = null,
-    Action<IReadOnlyList<DateTimeOffset>>? onChange = null)
+    Action<IReadOnlyList<DateTimeOffset>>? onChange = null,
+    TimeSpan? maxWait = null)
 {
     static readonly TimeSpan Window = TimeSpan.FromHours(1);
 
@@ -41,7 +44,10 @@ public sealed class HourlyCallLimiter(
                 onChange?.Invoke([.. _calls]);
                 return;
             }
-            await Task.Delay(_calls.Peek() + Window - now, time, cancellationToken);
+            var wait = _calls.Peek() + Window - now;
+            if (wait > maxWait)
+                throw new LpdbBudgetSpentException(now + wait);
+            await Task.Delay(wait, time, cancellationToken);
         }
     }
 
@@ -63,4 +69,12 @@ public sealed class HourlyCallLimiter(
         while (_calls.Count > 0 && now - _calls.Peek() >= Window)
             _calls.Dequeue();
     }
+}
+
+/// <summary>The hourly budget is spent and the run may not wait for it; the call was not made.</summary>
+public sealed class LpdbBudgetSpentException(DateTimeOffset nextCallAt)
+    : Exception($"This hour's Liquipedia budget is spent; the next call fits at {nextCallAt:yyyy-MM-dd HH:mm} UTC. "
+        + "Stopping instead of waiting.")
+{
+    public DateTimeOffset NextCallAt { get; } = nextCallAt;
 }

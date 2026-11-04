@@ -43,6 +43,26 @@ public class LpdbArchiveTests
     }
 
     [Fact]
+    public void SplitByDay_RefusesASeriesOutsideTheWindowRatherThanWriteAPartialDay()
+    {
+        // The fixture's series are dated 2026-07-08; a file for that day would replace a complete one.
+        var refusal = Assert.Throws<InvalidOperationException>(() => LpdbArchive.SplitByDay([Page(LpdbMatchParserTests.Fixture)],
+            new DateOnly(2026, 7, 9), new DateOnly(2026, 7, 10), FetchedAt));
+
+        Assert.Contains("2026-07-08", refusal.Message);
+    }
+
+    [Fact]
+    public void SplitByDay_FilesBySeriesDateFieldNotTheTimestamp()
+    {
+        var body = LpdbMatchParserTests.Fixture.Replace("\"timestamp\": 1783501200", "\"timestamp\": 1783400000");
+
+        var days = LpdbArchive.SplitByDay([Page(body)], new DateOnly(2026, 7, 8), new DateOnly(2026, 7, 8), FetchedAt);
+
+        Assert.Equal(2, JsonNode.Parse(days[new DateOnly(2026, 7, 8)])!["result"]!.AsArray().Count);
+    }
+
+    [Fact]
     public void ArchivedDay_ParsesToTheSameMapsAsTheResponse()
     {
         var day = LpdbArchive.SplitByDay([Page(LpdbMatchParserTests.Fixture)],

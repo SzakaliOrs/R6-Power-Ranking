@@ -57,6 +57,31 @@ public class HourlyCallLimiterTests
     }
 
     [Fact]
+    public async Task WaitAsync_StopsInsteadOfWaitingLongerThanAllowed()
+    {
+        var time = new FakeTimeProvider(Start);
+        var saved = new List<IReadOnlyList<DateTimeOffset>>();
+        var limiter = new HourlyCallLimiter(1, time, [Start - TimeSpan.FromMinutes(20)], saved.Add, TimeSpan.Zero);
+
+        var budgetSpent = await Assert.ThrowsAsync<LpdbBudgetSpentException>(() => limiter.WaitAsync());
+
+        Assert.Equal(Start + TimeSpan.FromMinutes(40), budgetSpent.NextCallAt);
+        // The refused call was not counted.
+        Assert.Empty(saved);
+        Assert.Single(limiter.RecentCalls);
+    }
+
+    [Fact]
+    public async Task WaitAsync_WithoutAWaitLimitStillCallsRightAwayWithinBudget()
+    {
+        var limiter = new HourlyCallLimiter(1, new FakeTimeProvider(Start), maxWait: TimeSpan.Zero);
+
+        await limiter.WaitAsync().WaitAsync(TimeSpan.FromSeconds(5));
+
+        Assert.Equal(0, limiter.Remaining);
+    }
+
+    [Fact]
     public void CallLogFile_RoundTripsAndStartsEmpty()
     {
         var path = Path.Combine(Path.GetTempPath(), $"lpdb-calls-{Guid.NewGuid():N}.json");

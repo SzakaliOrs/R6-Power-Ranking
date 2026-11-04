@@ -18,8 +18,10 @@ const string Usage = """
       --db <path>            rankings.db to update (default rankings.db)
       --archive-dir <path>   local archive folder (default archive)
       --call-log <path>      Liquipedia call log carried between runs (default lpdb-calls.json)
-      --b2                   fetch/backfill: also upload days to B2; reparse: read from B2
+      --b2                   fetch/backfill: also upload days to B2 (required on GitHub Actions); reparse: read from B2
       --restart              backfill: ignore the saved progress and start at --from
+      --wait                 fetch/backfill: wait for the hourly Liquipedia budget instead of stopping;
+                             for local runs only, since waiting on GitHub Actions spends billed minutes
 
     Environment:
       LIQUIPEDIA_API_KEY, LIQUIPEDIA_USER_AGENT                  for fetch and backfill
@@ -40,6 +42,10 @@ try
     };
 }
 catch (LpdbRateLimitedException e)
+{
+    return Fail(e.Message, 3);
+}
+catch (LpdbBudgetSpentException e)
 {
     return Fail(e.Message, 3);
 }
@@ -117,12 +123,14 @@ void CheckRange(DateOnly from, DateOnly to)
         UserAgent = Env("LIQUIPEDIA_USER_AGENT"),
     };
     var limiter = new CallLogFile(cli.Value("call-log") ?? "lpdb-calls.json")
-        .CreateLimiter(options.MaxCallsPerHour, TimeProvider.System);
+        .CreateLimiter(options.MaxCallsPerHour, TimeProvider.System, cli.Flag("wait") ? null : TimeSpan.Zero);
     return (new LpdbMatchSource(LpdbMatchSource.CreateHttpClient(), options, limiter), limiter);
 }
 
 List<IArchiveStore> Archives(Cli cli)
 {
+    if (!cli.Flag("b2") && Environment.GetEnvironmentVariable("GITHUB_ACTIONS") == "true")
+        throw new CliException("On GitHub Actions the local archive is deleted with the runner; pass --b2.");
     List<IArchiveStore> stores = [new LocalArchiveStore(cli.Value("archive-dir") ?? "archive")];
     if (cli.Flag("b2"))
         stores.Add(B2());

@@ -116,6 +116,14 @@ CREATE TABLE overrides (
     note            TEXT
 ) STRICT;
 
+-- Top-level season starts, entered through the admin dashboard like the overrides. Each start
+-- pulls every team offset part-way toward zero once; the first replayed season is the warm-up.
+CREATE TABLE seasons (
+    starts_on   TEXT PRIMARY KEY                -- the season begins at 00:00 UTC that day
+                CHECK (starts_on GLOB '[0-9][0-9][0-9][0-9]-[0-1][0-9]-[0-3][0-9]'),
+    name        TEXT NOT NULL                   -- e.g. '2026', for the admin dashboard
+) STRICT;
+
 -- Maps fetched but not yet rated; removed once rated and their raw response is in B2.
 CREATE TABLE maps (
     map_id          TEXT PRIMARY KEY,

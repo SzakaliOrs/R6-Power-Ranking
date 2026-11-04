@@ -103,7 +103,8 @@ public static class LpdbMatchParser
                 continue;
             }
             var (roundsA, roundsB) = scores!.Value;
-            maps.Add(new SourceMap(mapId, seriesId, Timestamp(game) ?? playedAt.Value, number, bestOf,
+            // Every map carries the series start, so a series' maps stay together in play order.
+            maps.Add(new SourceMap(mapId, seriesId, playedAt.Value, number, bestOf,
                 teamA, teamB, roundsA, roundsB, tier, tournament));
         }
     }
@@ -149,6 +150,11 @@ public static class LpdbMatchParser
         return DateTimeOffset.TryParseExact(Str(element, "date"), "yyyy-MM-dd HH:mm:ss", CultureInfo.InvariantCulture,
             DateTimeStyles.AssumeUniversal, out var date) ? date : null;
     }
+
+    /// <summary>The UTC "date" field that LPDB filters requests on, else <see cref="Timestamp"/>.</summary>
+    public static DateTimeOffset? ListedDate(JsonElement element) =>
+        DateTimeOffset.TryParseExact(Str(element, "date"), "yyyy-MM-dd HH:mm:ss", CultureInfo.InvariantCulture,
+            DateTimeStyles.AssumeUniversal, out var date) ? date : Timestamp(element);
 
     static string? Str(JsonElement element, string name) =>
         element.ValueKind == JsonValueKind.Object && element.TryGetProperty(name, out var value)

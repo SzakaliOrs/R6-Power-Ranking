@@ -140,6 +140,31 @@ public sealed class MatchImportTests : IDisposable
         Assert.Equal("2026-08-31", db.GetState(MatchImport.BackfillStateKey));
     }
 
+    /// Runs out of budget on the fetch after the first.
+    sealed class SpentAfterOneSource : IMatchSource
+    {
+        readonly FixtureSource _inner = new();
+
+        public Task<SourceBatch> FetchAsync(DateTimeOffset from, DateTimeOffset to, CancellationToken cancellationToken = default) =>
+            _inner.Windows.Count == 0
+                ? _inner.FetchAsync(from, to, cancellationToken)
+                : throw new LpdbBudgetSpentException(Now.AddHours(1));
+    }
+
+    [Fact]
+    public async Task Backfill_StopsWhenTheBudgetRunsOutWithinAMonth_AndKeepsTheLastFinishedMonth()
+    {
+        using var db = DbWithTeams();
+        var store = new LocalArchiveStore(_root);
+
+        var summary = await new MatchImport(db, [store])
+            .BackfillAsync(new SpentAfterOneSource(), () => 60, new DateOnly(2026, 6, 1), new DateOnly(2026, 7, 31));
+
+        Assert.True(summary.StoppedForBudget);
+        Assert.Equal("2026-06-30", db.GetState(MatchImport.BackfillStateKey));
+        Assert.Null(await store.ReadAsync("matches/2026/07/01.json.gz"));
+    }
+
     [Fact]
     public async Task Backfill_RestartIgnoresSavedProgress()
     {

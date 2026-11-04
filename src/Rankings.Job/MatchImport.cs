@@ -90,7 +90,16 @@ public sealed class MatchImport(RankingsDb db, IReadOnlyList<IArchiveStore> arch
 
             var lastDay = new DateOnly(month.Year, month.Month, DateTime.DaysInMonth(month.Year, month.Month));
             var end = lastDay < to ? lastDay : to;
-            var summary = await FetchAsync(source, month, end, cancellationToken);
+            ImportSummary summary;
+            try
+            {
+                summary = await FetchAsync(source, month, end, cancellationToken);
+            }
+            catch (LpdbBudgetSpentException)
+            {
+                // Spent partway through the month: nothing of it was archived, so it is fetched whole next time.
+                return total with { StoppedForBudget = true };
+            }
             db.SetState(BackfillStateKey, end.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture));
             total = new ImportSummary(total.Days + summary.Days, total.Maps + summary.Maps,
                 total.Skipped + summary.Skipped, summary.UnassignedTeams);

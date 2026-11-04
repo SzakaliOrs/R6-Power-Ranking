@@ -9,7 +9,7 @@ public class RankingsDbTests
     static readonly string[] AllTables =
     [
         "regions", "teams", "team_display", "players", "player_teams", "team_ratings",
-        "team_snapshots", "region_snapshots", "run_state", "overrides",
+        "team_snapshots", "region_snapshots", "run_state", "overrides", "seasons",
         "maps", "map_players", "provider_teams", "provider_players", "skipped_maps",
     ];
 
@@ -146,6 +146,7 @@ public class RankingsDbTests
     [InlineData("SELECT rating FROM region_snapshots", 1512.0)]
     [InlineData("SELECT value FROM run_state WHERE key = 'last_run'", "2026-11-02")]
     [InlineData("SELECT payload FROM overrides", """{"name":"SCARZ"}""")]
+    [InlineData("SELECT name FROM seasons", "2026")]
     [InlineData("SELECT rounds_b FROM maps", 8L)]
     [InlineData("SELECT COUNT(*) FROM map_players", 11L)]
     [InlineData("SELECT reason FROM skipped_maps", "no winner")]
@@ -165,6 +166,7 @@ public class RankingsDbTests
             INSERT INTO region_snapshots (date, region_id, rating, algorithm_version) VALUES ('2026-07-08', 'APAC', 1512, 'v1');
             INSERT INTO run_state (key, value) VALUES ('last_run', '2026-11-02');
             INSERT INTO overrides (kind, team_id, effective_on, payload) VALUES ('display', 2, '2026-07-01', '{"name":"SCARZ"}');
+            INSERT INTO seasons (starts_on, name) VALUES ('2026-01-15', '2026');
             INSERT INTO skipped_maps (map_id, reason, logged_at) VALUES ('x/1', 'no winner', 1783501200);
             INSERT INTO provider_teams (provider_key, team_id, name, first_seen_at, last_seen_at) VALUES ('scarz 2022', 2, 'SCARZ', 0, 0);
             INSERT INTO provider_players (provider_key, player_id) VALUES ('Zaka', 1);
@@ -181,12 +183,25 @@ public class RankingsDbTests
     [InlineData("INSERT INTO maps VALUES ('m', 's', 0, 1, 1, 1, 1, 7, 3)")]
     [InlineData("INSERT INTO maps VALUES ('m', 's', 0, 4, 3, 1, 2, 7, 3)")]
     [InlineData("INSERT INTO map_players VALUES ('missing-map', 'A', 1)")]
+    [InlineData("INSERT INTO seasons VALUES ('15/01/2026', '2026')")]
+    [InlineData("INSERT INTO seasons VALUES ('2026-01-15 00:00', '2026')")]
     public void Constraints_RejectInvalidRows(string sql)
     {
         using var db = RankingsDb.Open(":memory:");
         SeedTeamsAndPlayers(db);
 
         Assert.Throws<SqliteException>(() => db.Execute(sql));
+    }
+
+    [Fact]
+    public void SeasonStarts_LoadEarliestFirstAtMidnightUtc()
+    {
+        using var db = RankingsDb.Open(":memory:");
+        db.Execute("INSERT INTO seasons (starts_on, name) VALUES ('2026-01-15', '2026'), ('2025-02-01', '2025')");
+
+        Assert.Equal(
+            [DateTimeOffset.Parse("2025-02-01T00:00:00Z"), DateTimeOffset.Parse("2026-01-15T00:00:00Z")],
+            db.LoadSeasonStarts());
     }
 
     static List<string> Query(RankingsDb db, string sql)

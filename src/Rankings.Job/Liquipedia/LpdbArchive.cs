@@ -16,7 +16,10 @@ public static class LpdbArchive
     /// <summary>
     /// Regroups fetched pages by the day each series started. Every day in [from, to] gets a
     /// document, an empty one when nothing was played, which tells "fetched, nothing played"
-    /// apart from "never fetched". A series repeated across pages is kept once.
+    /// apart from "never fetched". A series repeated across pages is kept once. Days are taken
+    /// from the "date" field the request filtered on, so no series lands outside the window;
+    /// one that does anyway stops the run, since writing it would replace a complete day in B2
+    /// with part of one.
     /// </summary>
     public static SortedDictionary<DateOnly, string> SplitByDay(
         IEnumerable<RawResponse> responses, DateOnly from, DateOnly to, DateTimeOffset fetchedAt)
@@ -31,11 +34,13 @@ public static class LpdbArchive
             foreach (var series in document.RootElement.GetProperty("result").EnumerateArray())
             {
                 // The request filters by date, so every series has one.
-                if (LpdbMatchParser.Timestamp(series) is not { } start)
+                if (LpdbMatchParser.ListedDate(series) is not { } start)
                     continue;
                 var day = DateOnly.FromDateTime(start.UtcDateTime);
                 if (!days.TryGetValue(day, out var list))
-                    days[day] = list = [];
+                    throw new InvalidOperationException(
+                        $"Series {SeriesKey(series, 0)} is dated {day:yyyy-MM-dd}, outside the fetched days "
+                        + $"{from:yyyy-MM-dd}..{to:yyyy-MM-dd}; nothing was archived.");
                 list[SeriesKey(series, list.Count)] = series.GetRawText();
             }
         }
