@@ -8,10 +8,21 @@ namespace Rankings.Core;
 public sealed class RatingState
 {
     readonly Dictionary<string, double> _leagues = new(StringComparer.Ordinal);
+    readonly Dictionary<string, double> _leagueEntryLevels = new(StringComparer.Ordinal);
+    readonly Dictionary<string, DateTimeOffset> _leagueEnteredAt = new(StringComparer.Ordinal);
     readonly Dictionary<int, TeamRating> _teams = [];
     readonly Dictionary<int, PlayerRating> _players = [];
 
     public IReadOnlyDictionary<string, double> Leagues => _leagues;
+
+    /// <summary>
+    /// Admin input for a league that enters later (China in 2026): points above or below the
+    /// average established league that it starts at. A league without one starts at the average.
+    /// </summary>
+    public IReadOnlyDictionary<string, double> LeagueEntryLevels => _leagueEntryLevels;
+
+    /// <summary>When each league that entered after the start had its first team rated.</summary>
+    public IReadOnlyDictionary<string, DateTimeOffset> LeagueEnteredAt => _leagueEnteredAt;
 
     public IReadOnlyDictionary<int, TeamRating> Teams => _teams;
 
@@ -25,6 +36,11 @@ public sealed class RatingState
     public DateTimeOffset? WarmUpUntil { get; set; }
 
     public void AddLeague(string leagueId, double rating) => _leagues.Add(leagueId, rating);
+
+    public void SetLeagueEntryLevel(string leagueId, double level) => _leagueEntryLevels[leagueId] = level;
+
+    /// <summary>Records when a league entered, e.g. when loading the state from the database.</summary>
+    public void SetLeagueEnteredAt(string leagueId, DateTimeOffset enteredAt) => _leagueEnteredAt[leagueId] = enteredAt;
 
     /// <summary>Adds a team that already has a rating, e.g. loaded from the database or at the replay start.</summary>
     public TeamRating AddTeam(int teamId, string leagueId, double offset = 0) =>
@@ -46,6 +62,8 @@ public sealed class RatingState
             : throw new KeyNotFoundException($"Team {teamId} is not in the rating state.");
 
     internal void MoveLeague(string leagueId, double change) => _leagues[leagueId] += change;
+
+    internal void SetLeagueRating(string leagueId, double rating) => _leagues[leagueId] = rating;
 
     TeamRating Add(TeamRating team)
     {

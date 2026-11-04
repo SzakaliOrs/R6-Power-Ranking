@@ -9,6 +9,9 @@ CREATE TABLE regions (
     name        TEXT NOT NULL,
     parent_id   TEXT REFERENCES regions,        -- set on subregions
     rating      REAL DEFAULT 1500,              -- current rating; NULL on a grouping region
+    -- Admin input for a league that enters later (China in 2026): points above (+) or below (−)
+    -- the average established league that it starts at when its first team is rated; NULL = level.
+    entry_level REAL,
     CHECK (parent_id IS NULL OR parent_id <> region_id)
 ) STRICT;
 

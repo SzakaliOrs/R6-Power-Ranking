@@ -21,7 +21,9 @@ public sealed class RatingEngine(RatingSettings settings, IEnumerable<DateTimeOf
     /// play order, applies season starts and inactivity decay up to <paramref name="asOf"/>,
     /// then re-centres every league. A replay calls this once per day so it matches the daily runs.
     /// </summary>
-    public RatingRun Rate(RatingState state, IEnumerable<MapRecord> maps, DateTimeOffset asOf)
+    /// <param name="onPrediction">Called before each map is rated with team A's win chance, for the backtest.</param>
+    public RatingRun Rate(RatingState state, IEnumerable<MapRecord> maps, DateTimeOffset asOf,
+        Action<MapRecord, double>? onPrediction = null)
     {
         var skipped = new List<SkippedMap>();
         var events = new List<RosterEvent>();
@@ -52,6 +54,7 @@ public sealed class RatingEngine(RatingSettings settings, IEnumerable<DateTimeOf
                     [map.TeamA] = state.Rating(map.TeamA),
                     [map.TeamB] = state.Rating(map.TeamB),
                 };
+                onPrediction?.Invoke(map, Elo.Expected(state.Rating(map.TeamA), state.Rating(map.TeamB)));
                 RateMap(state, map);
                 teamsThatPlayed.Add(map.TeamA);
                 teamsThatPlayed.Add(map.TeamB);
@@ -150,7 +153,10 @@ public sealed class RatingEngine(RatingSettings settings, IEnumerable<DateTimeOf
     {
         if (!team.Seeded)
         {
-            Seed(state, team, lineup);
+            if (InNewLeague(state, team.League, playedAt))
+                StartLevel(team, lineup);
+            else
+                Seed(state, team, lineup);
             events.Add(new RosterEvent(playedAt, team.TeamId, RosterEventKind.Seeded));
             NoteSharedCores(state, team, playedAt, events);
             return;
@@ -208,6 +214,47 @@ public sealed class RatingEngine(RatingSettings settings, IEnumerable<DateTimeOf
             : lineup.Average(playerId => state.Players.TryGetValue(playerId, out var lastRating)
                 ? Settings.SeedingShare * lastRating.Offset
                 : -Settings.NewcomerGap);
+        team.Seeded = true;
+        team.RatedMaps = 0;
+        team.BoostMapsLeft = 0;
+        team.DecayPeriods = 0;
+        team.FrozenRating = null;
+        team.Lineup = lineup;
+    }
+
+    /// <summary>
+    /// Whether a team joining <paramref name="leagueId"/> joins a league new to the ratings, as
+    /// China was in 2026: one with no rated team yet, or still in the season it entered in. The
+    /// first such team enters the league, which then starts at the average established league plus
+    /// its entry level. Its teams start level with it, since they come from an established scene
+    /// the data did not cover, not from a lower division.
+    /// </summary>
+    bool InNewLeague(RatingState state, string leagueId, DateTimeOffset playedAt)
+    {
+        if (!state.LeagueEnteredAt.TryGetValue(leagueId, out var enteredAt))
+        {
+            if (state.Teams.Values.Any(team => team.League == leagueId && team.Seeded))
+                return false;
+            var establishedLeagues = state.Teams.Values
+                .Where(team => team.Seeded && team.League != leagueId)
+                .Select(team => team.League)
+                .Distinct()
+                .ToList();
+            if (establishedLeagues.Count > 0)
+                state.SetLeagueRating(leagueId, establishedLeagues.Average(league => state.Leagues[league])
+                    + state.LeagueEntryLevels.GetValueOrDefault(leagueId));
+            state.SetLeagueEnteredAt(leagueId, playedAt);
+            enteredAt = playedAt;
+        }
+        var firstSeasonEnd = _seasonStarts.Where(start => start > enteredAt).Cast<DateTimeOffset?>().FirstOrDefault()
+            ?? enteredAt.AddDays(365);
+        return playedAt < firstSeasonEnd;
+    }
+
+    /// <summary>A team in a new league starts at its league's rating, whoever its players are.</summary>
+    static void StartLevel(TeamRating team, IReadOnlyList<int> lineup)
+    {
+        team.Offset = 0;
         team.Seeded = true;
         team.RatedMaps = 0;
         team.BoostMapsLeft = 0;

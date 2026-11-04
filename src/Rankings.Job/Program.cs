@@ -10,9 +10,11 @@ const string Usage = """
       Rankings.Job fetch    --from YYYY-MM-DD --to YYYY-MM-DD [options] [--b2]
       Rankings.Job backfill [--from YYYY-MM-DD] [--to YYYY-MM-DD] [options] [--b2] [--restart]
       Rankings.Job reparse  --from YYYY-MM-DD --to YYYY-MM-DD [options] [--b2]
+      Rankings.Job backtest --synthetic [--seed N] [--seasons N]
 
     Dates are whole UTC days, both included; nothing before 2023-01-01 is fetched.
-    fetch and backfill call Liquipedia; reparse only reads the archive.
+    fetch and backfill call Liquipedia; reparse only reads the archive; backtest --synthetic
+    simulates its seasons and touches nothing.
 
     Options:
       --db <path>            rankings.db to update (default rankings.db)
@@ -38,6 +40,7 @@ try
         ["fetch", .. var rest] => await Fetch(Cli.Parse(rest)),
         ["backfill", .. var rest] => await Backfill(Cli.Parse(rest)),
         ["reparse", .. var rest] => await Reparse(Cli.Parse(rest)),
+        ["backtest", .. var rest] => RunBacktest(Cli.Parse(rest)),
         _ => Fail(Usage, 2),
     };
 }
@@ -104,6 +107,21 @@ async Task<int> Reparse(Cli cli)
     Report($"Reparsed from {archive.Name}", summary, null);
     if (summary.MissingDays is { Count: > 0 } missing)
         Console.WriteLine($"No archive file for {missing.Count} day(s), first {missing[0]:yyyy-MM-dd}.");
+    return 0;
+}
+
+int RunBacktest(Cli cli)
+{
+    if (!cli.Flag("synthetic"))
+        throw new CliException("Only --synthetic is available until the real history is backfilled.");
+    var options = new Rankings.Sim.SimulationOptions
+    {
+        Seed = cli.Number("seed", 1),
+        Seasons = cli.Number("seasons", 4),
+    };
+    if (options.Seasons < 3)
+        throw new CliException("--seasons must be at least 3: warm-up, tuning and check.");
+    Console.Write(SyntheticBacktest.Report(options));
     return 0;
 }
 
@@ -184,6 +202,15 @@ sealed class Cli
     public string? Value(string name) => _values.GetValueOrDefault(name);
 
     public bool Flag(string name) => _values.ContainsKey(name);
+
+    public int Number(string name, int fallback)
+    {
+        if (Value(name) is not { } text)
+            return fallback;
+        return int.TryParse(text, NumberStyles.Integer, CultureInfo.InvariantCulture, out var number)
+            ? number
+            : throw new CliException($"--{name} must be a whole number, not '{text}'.");
+    }
 
     public DateOnly Date(string name, DateOnly? fallback = null)
     {

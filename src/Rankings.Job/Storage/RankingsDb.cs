@@ -252,6 +252,18 @@ public sealed class RankingsDb : IDisposable
         return seasonStarts;
     }
 
+    /// <summary>Entry levels the admin set for leagues that enter later, by league.</summary>
+    public Dictionary<string, double> LoadLeagueEntryLevels()
+    {
+        using var cmd = Connection.CreateCommand();
+        cmd.CommandText = "SELECT region_id, entry_level FROM regions WHERE entry_level IS NOT NULL";
+        using var reader = cmd.ExecuteReader();
+        var entryLevels = new Dictionary<string, double>(StringComparer.Ordinal);
+        while (reader.Read())
+            entryLevels[reader.GetString(0)] = reader.GetDouble(1);
+        return entryLevels;
+    }
+
     public string? GetState(string key)
     {
         using var cmd = Connection.CreateCommand();

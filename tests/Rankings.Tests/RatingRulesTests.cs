@@ -251,6 +251,106 @@ public class RatingRulesTests
         Assert.Equal(new PlayerRating(2, state.Team(2).Offset), state.Players[25]);
     }
 
+    // A league new to the ratings (China in 2026)
+
+    /// <summary>EU at <paramref name="euRating"/> and NA at 1500 with a rated team each; CN with teams 9 and 10 not yet rated.</summary>
+    static RatingState StateWithNewLeague(double euRating = 1500, double? entryLevel = null)
+    {
+        var state = new RatingState();
+        state.AddLeague("EU", euRating);
+        state.AddLeague("NA", 1500);
+        state.AddLeague("CN", 1500);
+        state.AddTeam(1, "EU");
+        state.AddTeam(5, "NA");
+        state.AddNewTeam(9, "CN");
+        state.AddNewTeam(10, "CN");
+        if (entryLevel is { } level)
+            state.SetLeagueEntryLevel("CN", level);
+        return state;
+    }
+
+    [Fact]
+    public void NewLeague_ItsFirstTeamsStartLevelWithItNotAsNewcomers()
+    {
+        var map = Map(9, 10, 7, 5, playersA: [91, 92, 93, 94, 95], playersB: [101, 102, 103, 104, 105]);
+        var rated = StateWithNewLeague();
+        var byHand = StateWithNewLeague();
+        byHand.Team(9).Offset = 0;
+        byHand.Team(9).Seeded = true;
+        byHand.Team(10).Offset = 0;
+        byHand.Team(10).Seeded = true;
+
+        Engine.Rate(rated, [map], Day);
+        RateByHand(byHand, map);
+
+        AssertSameOffsets(byHand, rated);
+        Assert.Equal(Day, rated.LeagueEnteredAt["CN"]);
+    }
+
+    [Fact]
+    public void NewLeague_StartsAtTheAverageEstablishedLeague()
+    {
+        var state = StateWithNewLeague(euRating: 1540);
+
+        Engine.Rate(state, [Map(9, 10, 7, 5)], Day);
+
+        Assert.Equal(1520, state.Leagues["CN"], 9);
+    }
+
+    [Fact]
+    public void NewLeague_StartsAtTheAdminsEntryLevelFromTheAverage()
+    {
+        var state = StateWithNewLeague(euRating: 1540, entryLevel: -40);
+
+        Engine.Rate(state, [Map(9, 10, 7, 5)], Day);
+
+        Assert.Equal(1480, state.Leagues["CN"], 9);
+    }
+
+    [Fact]
+    public void NewLeague_TeamsJoiningLaterInItsFirstSeasonStillStartLevel()
+    {
+        var engine = new RatingEngine(Settings, [Day.AddDays(-30), Day.AddDays(200)]);
+        var state = StateWithNewLeague();
+        engine.Rate(state, [Map(9, 10, 8, 7)], Day);
+        state.AddNewTeam(11, "CN");
+        var predictions = new List<double>();
+
+        engine.Rate(state, [Map(11, 9, 7, 5, "s2", playedAt: Day.AddDays(10), playersA: [111, 112, 113, 114, 115])],
+            Day.AddDays(10), (_, chanceTeamAWins) => predictions.Add(chanceTeamAWins));
+
+        // Level with the league, team 11 faces team 9 at +8: just under even, not a newcomer's 0.42.
+        Assert.Equal(Elo.Expected(0, 8), Assert.Single(predictions), 9);
+    }
+
+    [Fact]
+    public void NewLeague_AfterItsFirstSeasonNewTeamsAreSeededFromTheirPlayersAgain()
+    {
+        var engine = new RatingEngine(Settings, [Day.AddDays(100)]);
+        var state = StateWithNewLeague();
+        engine.Rate(state, [Map(9, 10, 8, 7)], Day);
+        state.AddNewTeam(11, "CN");
+        var predictions = new List<double>();
+
+        engine.Rate(state, [Map(11, 9, 7, 5, "s2", playedAt: Day.AddDays(150), playersA: [111, 112, 113, 114, 115])],
+            Day.AddDays(150), (_, chanceTeamAWins) => predictions.Add(chanceTeamAWins));
+
+        // Five newcomers start at the newcomer gap below the league, like a promoted team.
+        Assert.True(Assert.Single(predictions) < 0.45);
+    }
+
+    [Fact]
+    public void NewLeague_AnExistingLeaguesNewTeamIsStillSeededFromItsPlayers()
+    {
+        var state = StateWithNewLeague();
+        state.AddNewTeam(2, "EU");
+
+        Engine.Rate(state, [Map(2, 1, 7, 5, playersA: [21, 22, 23, 24, 25])], Day);
+
+        Assert.False(state.LeagueEnteredAt.ContainsKey("EU"));
+        Assert.True(state.Team(2).Offset < state.Team(1).Offset);
+    }
+
     // Season start
 
     [Fact]

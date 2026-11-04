@@ -147,6 +147,7 @@ public class RankingsDbTests
     [InlineData("SELECT value FROM run_state WHERE key = 'last_run'", "2026-11-02")]
     [InlineData("SELECT payload FROM overrides", """{"name":"SCARZ"}""")]
     [InlineData("SELECT name FROM seasons", "2026")]
+    [InlineData("SELECT entry_level FROM regions WHERE region_id = 'CN'", -40.0)]
     [InlineData("SELECT rounds_b FROM maps", 8L)]
     [InlineData("SELECT COUNT(*) FROM map_players", 11L)]
     [InlineData("SELECT reason FROM skipped_maps", "no winner")]
@@ -167,6 +168,7 @@ public class RankingsDbTests
             INSERT INTO run_state (key, value) VALUES ('last_run', '2026-11-02');
             INSERT INTO overrides (kind, team_id, effective_on, payload) VALUES ('display', 2, '2026-07-01', '{"name":"SCARZ"}');
             INSERT INTO seasons (starts_on, name) VALUES ('2026-01-15', '2026');
+            UPDATE regions SET entry_level = -40 WHERE region_id = 'CN';
             INSERT INTO skipped_maps (map_id, reason, logged_at) VALUES ('x/1', 'no winner', 1783501200);
             INSERT INTO provider_teams (provider_key, team_id, name, first_seen_at, last_seen_at) VALUES ('scarz 2022', 2, 'SCARZ', 0, 0);
             INSERT INTO provider_players (provider_key, player_id) VALUES ('Zaka', 1);
@@ -202,6 +204,15 @@ public class RankingsDbTests
         Assert.Equal(
             [DateTimeOffset.Parse("2025-02-01T00:00:00Z"), DateTimeOffset.Parse("2026-01-15T00:00:00Z")],
             db.LoadSeasonStarts());
+    }
+
+    [Fact]
+    public void LeagueEntryLevels_LoadOnlyTheLeaguesTheAdminSet()
+    {
+        using var db = RankingsDb.Open(":memory:");
+        db.Execute("UPDATE regions SET entry_level = -40 WHERE region_id = 'CN'");
+
+        Assert.Equal(new Dictionary<string, double> { ["CN"] = -40 }, db.LoadLeagueEntryLevels());
     }
 
     static List<string> Query(RankingsDb db, string sql)
