@@ -188,6 +188,74 @@ public sealed class RankingsDb : IDisposable
         return maps;
     }
 
+    /// <summary>Logs maps that could not be rated; a map skipped again keeps one row with the latest reason.</summary>
+    public void SaveSkipped(IEnumerable<SkippedSourceMap> skipped, DateTimeOffset loggedAt)
+    {
+        using var tx = Connection.BeginTransaction();
+        using var cmd = Connection.CreateCommand();
+        cmd.Transaction = tx;
+        cmd.CommandText = """
+            INSERT INTO skipped_maps (map_id, series_id, played_at, reason, logged_at)
+            VALUES ($map_id, $series_id, $played_at, $reason, $logged_at)
+            ON CONFLICT (map_id) DO UPDATE SET
+                series_id = excluded.series_id,
+                played_at = excluded.played_at,
+                reason = excluded.reason,
+                logged_at = excluded.logged_at
+            """;
+        var mapId = cmd.Parameters.Add("$map_id", SqliteType.Text);
+        var seriesId = cmd.Parameters.Add("$series_id", SqliteType.Text);
+        var playedAt = cmd.Parameters.Add("$played_at", SqliteType.Integer);
+        var reason = cmd.Parameters.Add("$reason", SqliteType.Text);
+        cmd.Parameters.AddWithValue("$logged_at", loggedAt.ToUnixTimeSeconds());
+
+        foreach (var skip in skipped)
+        {
+            mapId.Value = skip.MapId;
+            seriesId.Value = (object?)skip.SeriesId ?? DBNull.Value;
+            playedAt.Value = (object?)skip.PlayedAt?.ToUnixTimeSeconds() ?? DBNull.Value;
+            reason.Value = skip.Reason;
+            cmd.ExecuteNonQuery();
+        }
+        tx.Commit();
+    }
+
+    /// <summary>Removes skip log rows by map or series ID, once those maps were stored after all.</summary>
+    public void ClearSkipped(IEnumerable<string> ids)
+    {
+        using var tx = Connection.BeginTransaction();
+        using var cmd = Connection.CreateCommand();
+        cmd.Transaction = tx;
+        cmd.CommandText = "DELETE FROM skipped_maps WHERE map_id = $id";
+        var id = cmd.Parameters.Add("$id", SqliteType.Text);
+        foreach (var value in ids.Distinct())
+        {
+            id.Value = value;
+            cmd.ExecuteNonQuery();
+        }
+        tx.Commit();
+    }
+
+    public string? GetState(string key)
+    {
+        using var cmd = Connection.CreateCommand();
+        cmd.CommandText = "SELECT value FROM run_state WHERE key = $key";
+        cmd.Parameters.AddWithValue("$key", key);
+        return cmd.ExecuteScalar() as string;
+    }
+
+    public void SetState(string key, string value)
+    {
+        using var cmd = Connection.CreateCommand();
+        cmd.CommandText = """
+            INSERT INTO run_state (key, value) VALUES ($key, $value)
+            ON CONFLICT (key) DO UPDATE SET value = excluded.value
+            """;
+        cmd.Parameters.AddWithValue("$key", key);
+        cmd.Parameters.AddWithValue("$value", value);
+        cmd.ExecuteNonQuery();
+    }
+
     public int Execute(string sql, SqliteTransaction? tx = null)
     {
         using var cmd = Connection.CreateCommand();

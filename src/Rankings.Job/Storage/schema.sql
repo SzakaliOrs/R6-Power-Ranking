@@ -138,6 +138,27 @@ CREATE TABLE map_players (
     PRIMARY KEY (map_id, side, player_id)
 ) STRICT;
 
+-- Provider team keys (Liquipedia team templates). team_id stays NULL until the team is
+-- assigned through the admin endpoint; maps with an unassigned team are skipped. A rebrand
+-- arrives as a new key, which the admin endpoint links to the existing team.
+CREATE TABLE provider_teams (
+    provider_key    TEXT PRIMARY KEY,
+    team_id         INTEGER REFERENCES teams,
+    name            TEXT NOT NULL,              -- as the provider last showed it
+    last_tournament TEXT,                       -- context for whoever assigns it
+    first_seen_at   INTEGER NOT NULL,
+    last_seen_at    INTEGER NOT NULL
+) STRICT;
+CREATE INDEX provider_teams_team ON provider_teams (team_id);
+
+-- Provider player keys (Liquipedia page names). A new key creates a player; a renamed
+-- player's new key can be relinked to the existing player through the admin endpoint.
+CREATE TABLE provider_players (
+    provider_key    TEXT PRIMARY KEY,
+    player_id       INTEGER NOT NULL REFERENCES players
+) STRICT;
+CREATE INDEX provider_players_player ON provider_players (player_id);
+
 -- Maps that could not be rated (no winner, walkover, unknown team), kept for the log.
 CREATE TABLE skipped_maps (
     map_id      TEXT PRIMARY KEY,

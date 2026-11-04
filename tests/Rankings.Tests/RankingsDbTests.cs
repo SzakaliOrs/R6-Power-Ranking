@@ -10,7 +10,7 @@ public class RankingsDbTests
     [
         "regions", "teams", "team_display", "players", "player_teams", "team_ratings",
         "team_snapshots", "region_snapshots", "run_state", "overrides",
-        "maps", "map_players", "skipped_maps",
+        "maps", "map_players", "provider_teams", "provider_players", "skipped_maps",
     ];
 
     static MapRecord SampleMap(string mapId = "XtD9IqfaeJ_R01-M001/1", int roundsA = 7, int roundsB = 8) => new(
@@ -149,6 +149,8 @@ public class RankingsDbTests
     [InlineData("SELECT rounds_b FROM maps", 8L)]
     [InlineData("SELECT COUNT(*) FROM map_players", 11L)]
     [InlineData("SELECT reason FROM skipped_maps", "no winner")]
+    [InlineData("SELECT team_id FROM provider_teams", 2L)]
+    [InlineData("SELECT player_id FROM provider_players", 1L)]
     public void EveryTable_CanBeWrittenAndRead(string query, object expected)
     {
         using var db = RankingsDb.Open(":memory:");
@@ -164,6 +166,8 @@ public class RankingsDbTests
             INSERT INTO run_state (key, value) VALUES ('last_run', '2026-11-02');
             INSERT INTO overrides (kind, team_id, effective_on, payload) VALUES ('display', 2, '2026-07-01', '{"name":"SCARZ"}');
             INSERT INTO skipped_maps (map_id, reason, logged_at) VALUES ('x/1', 'no winner', 1783501200);
+            INSERT INTO provider_teams (provider_key, team_id, name, first_seen_at, last_seen_at) VALUES ('scarz 2022', 2, 'SCARZ', 0, 0);
+            INSERT INTO provider_players (provider_key, player_id) VALUES ('Zaka', 1);
             """);
 
         Assert.Equal(expected, db.Scalar(query));
