@@ -112,6 +112,15 @@ tr.subregion td a { color: inherit; }
 .chart text { fill: var(--muted); font-size: 11px; }
 .chart .grid { stroke: var(--line); }
 
+.prose { max-width: 70ch; }
+.prose p { margin: 0 0 12px; }
+.prose ul { margin: 0 0 12px; padding-left: 20px; }
+.prose li { margin-bottom: 6px; }
+.prose .table-scroll { margin-bottom: 12px; }
+table.compact { width: auto; }
+table.compact td, table.compact th { padding-left: 16px; }
+table.compact td:first-child, table.compact th:first-child { padding-left: 6px; }
+
 .site-footer { border-top: 1px solid var(--line); padding-top: 12px; padding-bottom: 24px; font-size: 13px; }
 .site-footer p { margin: 4px 0; }
 

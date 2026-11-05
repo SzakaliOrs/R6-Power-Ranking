@@ -16,6 +16,7 @@
         <a href="#/rankings" data-tab="rankings">Rankings</a>
         <a href="#/regions" data-tab="regions">Regions</a>
         <a href="#/movers" data-tab="movers">Movers</a>
+        <a href="#/method" data-tab="method">Method</a>
       </nav>
     </div>
   </header>
@@ -26,6 +27,108 @@
     <p id="updated" class="muted"></p>
     <p class="muted">Every top-level map counts, rated with a two-layer Elo: region rating plus the team's offset within it. Rankings change once a day.</p>
   </footer>
+  <template id="method-template">
+    <article class="prose">
+      <h1>How the ranking works</h1>
+      <p class="lead">Every top-level map changes the ratings of the two teams that played it. The ratings are
+        recalculated once a day from the full match history.</p>
+
+      <h2>What counts</h2>
+      <p>Every finished map from Liquipedia's tier 1 and tier 2 Rainbow Six events since 1 January 2023: regional
+        leagues, majors and the world championship. Qualifiers and showmatches are left out. A map without a winner,
+        such as a walkover, is skipped.</p>
+
+      <h2>Two layers: region and team</h2>
+      <p>A team's rating is <strong>its region's rating plus its own offset</strong> within that region. The offset
+        says how much stronger or weaker the team is than its region's average. The region's rating says how strong
+        that region is compared with the others.</p>
+      <ul>
+        <li><strong>Region against region.</strong> Europe, North America, South America and China are one region
+          each. Asia-Pacific is split into Asia, Oceania and APAC North, which are rated separately, so a map between
+          two of them counts as international. The Regions tab shows Asia-Pacific as the average of the three.</li>
+        <li><strong>Within one region,</strong> a map moves only the two teams' offsets. It cannot make the region
+          as a whole stronger or weaker.</li>
+        <li><strong>Between two regions,</strong> a map moves both teams' offsets and both regions' ratings. This
+          is how international events decide how the regions compare.</li>
+        <li><strong>Every day,</strong> each region's offsets are shifted to average zero, and the difference
+          moves into the region's rating. This changes no team's rating; it only keeps a region's rating equal to
+          the average strength of its teams.</li>
+      </ul>
+
+      <h2>What a rating difference means</h2>
+      <p>Ratings work like Elo ratings in chess: the gap between two teams gives the expected chance of winning a
+        map.</p>
+      <div class="table-scroll"><table class="compact">
+        <thead><tr><th class="num">Rating gap</th><th class="num">Stronger team wins a map</th></tr></thead>
+        <tbody>
+          <tr><td class="num">0</td><td class="num">50%</td></tr>
+          <tr><td class="num">50</td><td class="num">57%</td></tr>
+          <tr><td class="num">100</td><td class="num">64%</td></tr>
+          <tr><td class="num">200</td><td class="num">76%</td></tr>
+          <tr><td class="num">400</td><td class="num">91%</td></tr>
+        </tbody>
+      </table></div>
+
+      <h2>One map</h2>
+      <p>After each map, the winner gains rating and the loser loses the same amount. How much depends on three
+        things.</p>
+      <ul>
+        <li><strong>How surprising the result was.</strong> Beating a much stronger team earns a lot; beating a much
+          weaker one earns little.</li>
+        <li><strong>The round margin.</strong> A 7–1 win counts for more than an 8–7 win in overtime, with
+          diminishing returns: each extra round adds less. Overtime scores count as played, so 8–6 is a margin of
+          2.</li>
+        <li><strong>Who was favoured.</strong> When the favourite wins, the margin counts for a little less, and when
+          the underdog wins, for a little more. Strong teams therefore can't gain rating endlessly by beating weak ones
+          by wide margins.</li>
+      </ul>
+      <p>Winning a best-of-three or best-of-five series earns one small extra update, taken from the loser. It is
+        larger the less likely the win was before the series began. That way the series result counts too, not only
+        the maps.</p>
+
+      <h2>Rosters</h2>
+      <p>A team is its <strong>roster core</strong>, not its name. A team stays the same team as long as its lineup
+        keeps at least 3 of the players from its previous lineup.</p>
+      <ul>
+        <li><strong>Each new player</strong> pulls the team part-way back toward its region's average. For a few
+          maps after that, the team's rating moves faster, so it settles quickly at its new level.</li>
+        <li><strong>If fewer than 3 players stay,</strong> the team is rated as a new team, even under the same
+          name.</li>
+        <li><strong>A new team</strong> starts from its players' history: a share of how their previous teams were
+          rated. Players new to the top level start a little below their region's average.</li>
+        <li><strong>A rename or a new logo</strong> changes nothing, because the roster core is the same. An
+          organisation that moves to another region is rated there as a new team.</li>
+      </ul>
+
+      <h2>Time</h2>
+      <ul>
+        <li><strong>At the start of each season,</strong> every team is pulled part-way toward its region's average.
+          Rosters change and teams improve over an off-season, so old results count for a little less.</li>
+        <li><strong>A team without a top-level map for 90 days</strong> slowly loses rating, a step every 30 days,
+          toward the level of a new team.</li>
+        <li><strong>A relegated or disbanded team</strong> leaves the ranking but keeps its rating. If it returns to
+          the top level, it continues from there.</li>
+      </ul>
+
+      <h2>Provisional teams</h2>
+      <p>A team marked <span class="badge">Provisional</span> has fewer than 10 rated maps. Its rating is still a
+        rough estimate and can move a lot.</p>
+
+      <h2>New regions</h2>
+      <p>China's league joined the top level in 2026, when its teams had no international results yet. China
+        therefore starts at a level set by hand, relative to the established regions. International results move it
+        from there like any other region.</p>
+
+      <h2>Settings and updates</h2>
+      <p>The step sizes and other settings are tuned by replaying past seasons and checking how well the ratings
+        predicted each map before it was played. The first season of the history is a warm-up: there, the ratings move
+        twice as fast so the teams can find their levels. The ratings are recalculated once a day from the full history,
+        so the same results always give the same ranking.</p>
+
+      <p class="muted">Match data from <a href="https://liquipedia.net/rainbowsix/" rel="noopener">Liquipedia</a>,
+        licensed under <a href="https://creativecommons.org/licenses/by-sa/3.0/" rel="noopener">CC BY-SA 3.0</a>.</p>
+    </article>
+  </template>
   <script src="app.js"></script>
 </body>
 </html>

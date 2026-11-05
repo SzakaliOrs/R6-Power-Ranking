@@ -1,5 +1,5 @@
 // R6 Power Ranking: a static page with one JSON file per tab, loaded when the tab opens.
-// Routes: #/rankings, #/regions, #/movers, #/team/<id>.
+// Routes: #/rankings, #/regions, #/movers, #/method, #/team/<id>.
 "use strict";
 
 const view = document.getElementById("view");
@@ -166,6 +166,11 @@ function historyChart(history) {
   </svg>`;
 }
 
+// The methodology is static text kept in index.html, so it shows even when no data has loaded.
+function showMethod() {
+  view.replaceChildren(document.getElementById("method-template").content.cloneNode(true));
+}
+
 const rosterLabels = {
   Seeded: "New team, rated from its players",
   NewCore: "Most of the roster changed: rated as a new team",
@@ -226,6 +231,7 @@ async function route() {
     if (section === "team" && id) await showTeam(id);
     else if (section === "regions") await showRegions();
     else if (section === "movers") await showMovers();
+    else if (section === "method") showMethod();
     else await showRankings();
   } catch (error) {
     view.innerHTML = `<h1>Something went wrong</h1><p class="muted">${escapeHtml(error.message)}</p>`;
