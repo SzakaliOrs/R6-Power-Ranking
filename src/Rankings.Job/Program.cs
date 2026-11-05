@@ -6,6 +6,7 @@ using Rankings.Job.Storage;
 
 const string Usage = """
     Usage:
+      Rankings.Job run      [--source liquipedia|synthetic] [--seed N] [--full] [--site-out DIR] [options] [--b2]
       Rankings.Job init-db <path>
       Rankings.Job fetch    --from YYYY-MM-DD --to YYYY-MM-DD [options] [--b2]
       Rankings.Job backfill [--from YYYY-MM-DD] [--to YYYY-MM-DD] [options] [--b2] [--restart]
@@ -14,10 +15,17 @@ const string Usage = """
       Rankings.Job sample-site [--seed N] [--out web/public/data]
 
     Dates are whole UTC days, both included; nothing before 2023-01-01 is fetched.
+    run is the daily run: it fetches yesterday and the 2 days before, rates every day since the
+    last settled one and writes the site's JSON; --full rebuilds every rating from the archive.
     fetch and backfill call Liquipedia; reparse only reads the archive; backtest --synthetic
     simulates its seasons and touches nothing; sample-site writes the site's JSON from synthetic seasons.
 
     Options:
+      --source <name>        run: liquipedia (default) or synthetic, whose archive keys start with synthetic/
+      --seed <N>             run --source synthetic, backtest, sample-site: which synthetic world (default 1)
+      --full                 run: rebuild every rating from the archive (synthetic: from the simulation)
+      --site-out <dir>       run: where the site's JSON goes (default web/public/data)
+      --today YYYY-MM-DD     run: act as if run on that day, e.g. to step through synthetic days locally
       --db <path>            rankings.db to update (default rankings.db)
       --archive-dir <path>   local archive folder (default archive)
       --call-log <path>      Liquipedia call log carried between runs (default lpdb-calls.json)
@@ -37,6 +45,7 @@ try
 {
     return args switch
     {
+        ["run", .. var rest] => await RunDaily(Cli.Parse(rest)),
         ["init-db", var path] => InitDb(path),
         ["fetch", .. var rest] => await Fetch(Cli.Parse(rest)),
         ["backfill", .. var rest] => await Backfill(Cli.Parse(rest)),
@@ -58,6 +67,79 @@ catch (CliException e)
 {
     return Fail($"{e.Message}\n\n{Usage}", 2);
 }
+catch (DailyRunException e)
+{
+    return Fail(e.Message, 1);
+}
+
+async Task<int> RunDaily(Cli cli)
+{
+    var sourceName = cli.Value("source") ?? "liquipedia";
+    TimeProvider time = cli.Value("today") is null
+        ? TimeProvider.System
+        : new FixedClock(new DateTimeOffset(cli.Date("today").ToDateTime(new TimeOnly(4, 17)), TimeSpan.Zero));
+    using var db = RankingsDb.Open(cli.Value("db") ?? "rankings.db");
+
+    Rankings.Core.IMatchSource source;
+    HourlyCallLimiter? limiter = null;
+    var archives = Archives(cli);
+    switch (sourceName)
+    {
+        case "liquipedia":
+            (source, limiter) = Liquipedia(cli);
+            break;
+        case SyntheticSetup.DataSource:
+            var world = Rankings.Sim.Simulator.Run(new Rankings.Sim.SimulationOptions { Seed = cli.Number("seed", 1) });
+            SyntheticSetup.Ensure(db, world);
+            source = new Rankings.Sim.SimulatedMatchSource(world);
+            archives = [.. archives.Select(store => (IArchiveStore)new PrefixedArchiveStore(store, SyntheticSetup.ArchivePrefix))];
+            break;
+        default:
+            throw new CliException($"--source must be liquipedia or synthetic, not '{sourceName}'.");
+    }
+
+    // A synthetic database with nothing rated starts from the whole simulated history, which
+    // costs nothing; a Liquipedia one starts from what a backfill stored.
+    var synthetic = sourceName == SyntheticSetup.DataSource;
+    var full = cli.Flag("full") || (synthetic && db.GetState(RatingsStore.RatedThroughKey) is null);
+
+    // The last store is B2 with --b2, else the local folder: a full recalculation reads from it.
+    var dailyRun = new DailyRun(db, source, archives, archives[^1], new Rankings.Core.RatingSettings(), time);
+    var summary = await dailyRun.RunAsync(new DailyRunOptions
+    {
+        DataSource = sourceName,
+        Full = full,
+        FetchWholeHistory = full && synthetic,
+    });
+
+    Console.WriteLine(summary.RatedFrom is { } ratedFrom
+        ? $"Rated {ratedFrom:yyyy-MM-dd} through {summary.RatedThrough:yyyy-MM-dd}: {summary.RatedMaps} map(s)."
+        : $"Nothing new to rate through {summary.RatedThrough:yyyy-MM-dd}.");
+    Console.WriteLine(summary.SettledThrough is { } settledThrough
+        ? $"Settled through {settledThrough:yyyy-MM-dd}; later days are rated again in the next run."
+        : "No day has settled yet.");
+    Console.WriteLine($"Fetched {summary.FetchedMaps} map(s), {summary.Skipped} skipped, {summary.UnassignedTeams} team(s) waiting for an assignment.");
+    if (summary.ReparsedDays > 0)
+        Console.WriteLine($"Read {summary.ReparsedDays} archived day(s) back.");
+    if (summary.MissingDays.Count > 0)
+        Console.WriteLine($"No archive file for {summary.MissingDays.Count} day(s), first {summary.MissingDays[0]:yyyy-MM-dd}.");
+    if (limiter is not null)
+        Console.WriteLine($"Liquipedia calls in the last hour: {limiter.RecentCalls.Count}, {limiter.Remaining} left.");
+    if (summary.UnassignedTeams > 0)
+        Warn($"{summary.UnassignedTeams} team(s) wait for an assignment in the admin dashboard; their maps are skipped until then.");
+    if (summary.LateMaps > 0)
+        Warn($"{summary.LateMaps} map(s) were stored for days already settled. Run a full recalculation to rate them.");
+
+    var siteOut = cli.Value("site-out") ?? Path.Combine("web", "public", "data");
+    if (dailyRun.ExportSite(siteOut, sourceName))
+        Console.WriteLine($"Wrote the site's data to {siteOut}.");
+    else
+        Warn("Nothing is rated yet, so no site data was written.");
+    return 0;
+}
+
+void Warn(string message) =>
+    Console.WriteLine(Environment.GetEnvironmentVariable("GITHUB_ACTIONS") == "true" ? $"::warning::{message}" : $"Warning: {message}");
 
 int InitDb(string path)
 {
@@ -190,6 +272,12 @@ int Fail(string message, int code)
 }
 
 sealed class CliException(string message) : Exception(message);
+
+/// <summary>A clock stopped at one instant, for --today.</summary>
+sealed class FixedClock(DateTimeOffset now) : TimeProvider
+{
+    public override DateTimeOffset GetUtcNow() => now;
+}
 
 /// <summary>"--name value" options and "--name" flags.</summary>
 sealed class Cli

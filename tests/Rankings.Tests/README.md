@@ -26,6 +26,7 @@ dotnet test --filter "FullyQualifiedName~RatingRules"    # one class
 | `HourlyCallLimiterTests` | The 60-calls-an-hour budget and the saved call log |
 | `MatchImportTests` | Fetch, backfill progress, and reparse after an assignment |
 | `SiteExportTests` | The site's JSON files |
+| `DailyRunTests` | A week of daily runs equals a full recalculation from the archive, late results inside the lookback, settling, the site from the database, the data-source guard, late team assignments, the exact checkpoint |
 | `AdminTests` | Admin store changes, R2 sync refusals, local-only checks |
 
 `Fixtures/` holds a real LPDB response (APAC North playoffs), which is copied to the output folder

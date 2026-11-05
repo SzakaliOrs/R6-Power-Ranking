@@ -75,17 +75,28 @@ GitHub Actions the same values come from repository secrets and variables.
 
 ## Workflows
 
+- **Daily run** ([daily.yml](.github/workflows/daily.yml)): every day at 04:17 UTC, and by hand with
+  an optional **full recalculation**. It downloads `rankings.db` and the call log from R2, runs
+  `Rankings.Job run --b2`, deploys the site, backs up the previous database to `db-backups/` (keeping
+  the latest 14), and uploads the new one. Any failed step stops the run before the live database
+  is replaced. The call log is uploaded even after a failure.
 - **Setup check** ([setup-check.yml](.github/workflows/setup-check.yml)): a manual run that lists
   both buckets and deploys `web/public` to the Worker. Because `web/public/data/` is not in git, the
   deployed page has no data unless a step generates it first.
-- **Daily run**: not written yet. It is planned for `17 4 * * *` (04:17 UTC).
+
+The daily run reads two optional repository variables:
+
+| Variable | Default | Meaning |
+|---|---|---|
+| `MATCH_SOURCE` | `synthetic` | `synthetic` or `liquipedia`. Switching needs an empty `rankings.db` in R2. |
+| `BACKUPS_KEPT` | `14` | How many `db-backups/` copies to keep |
 
 ## Status
 
-Phases 0 to 3 are done: setup, data model, rating engine, synthetic data and backtest. The frontend
-(Phase 4) is built but not yet deployed. The daily pipeline (Phase 5) and manual team changes in
-the rating runs (Phase 6) come next. The Liquipedia adapter is built and tested against sample
-responses, but the job does not call it on a schedule yet.
+Phases 0 to 4 are done: setup, data model, rating engine, synthetic data and backtest, and the
+frontend on the custom domain. The daily pipeline (Phase 5) is built and tested locally on
+synthetic data; it is done once a week of scheduled runs has worked. Manual team changes in the
+rating runs (Phase 6) come next.
 
 ## License
 

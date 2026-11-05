@@ -243,8 +243,9 @@ async function showUpdated() {
   try {
     const meta = await loadJson("meta.json");
     const updated = new Date(meta.updatedAt).toLocaleString(undefined, { dateStyle: "medium", timeStyle: "short" });
+    const synthetic = meta.dataSource === "synthetic" || meta.algorithmVersion === "sample";
     document.getElementById("updated").textContent =
-      `Last updated ${updated}${meta.algorithmVersion === "sample" ? " · sample data from synthetic seasons" : ""}.`;
+      `Last updated ${updated}${synthetic ? " · sample data from synthetic seasons" : ""}.`;
   } catch {
     // The page still works without the meta file.
   }

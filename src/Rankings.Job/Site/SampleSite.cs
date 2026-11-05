@@ -41,18 +41,18 @@ public static class SampleSite
 
         var teams = history.TeamLeagues
             .OrderBy(team => team.Key)
-            .Select(team => new SiteTeam(team.Key, Name(team.Key), ShortName(team.Key), Logo: null, team.Value))
+            .Select(team => new SiteTeam(team.Key, TeamName(team.Key), ShortTeamName(team.Key), Logo: null, team.Value))
             .ToList();
         var lastDay = days[^1].Date;
         return new SiteInput(
             UpdatedAt: new DateTimeOffset(lastDay.AddDays(1).ToDateTime(new TimeOnly(4, 17)), TimeSpan.Zero),
             AlgorithmVersion: "sample",
             SeasonStart: history.SeasonStarts.Order().Last(),
-            teams, SiteExport.DefaultRegions, days, maps, rosterEvents);
+            teams, SiteExport.DefaultRegions, days, maps, rosterEvents, SyntheticSetup.DataSource);
     }
 
     /// <summary>A distinct two-word name for each of the first 400 team IDs.</summary>
-    static string Name(int teamId)
+    public static string TeamName(int teamId)
     {
         var index = teamId - 1;
         var first = index % FirstWords.Length;
@@ -60,6 +60,6 @@ public static class SampleSite
         return $"{FirstWords[first]} {SecondWords[second]}";
     }
 
-    static string ShortName(int teamId) =>
-        string.Concat(Name(teamId).Split(' ').Select(word => word[..2].ToUpperInvariant()));
+    public static string ShortTeamName(int teamId) =>
+        string.Concat(TeamName(teamId).Split(' ').Select(word => word[..2].ToUpperInvariant()));
 }

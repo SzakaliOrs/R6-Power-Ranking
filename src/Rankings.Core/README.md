@@ -45,7 +45,8 @@ Before a team plays a map, the engine also handles its roster, its history and t
 | `RatingState` | Everything carried between runs: league ratings, team offsets, players' last offsets |
 | `RatingEngine` | One run: rates maps series by series, then applies seasons, decay and re-centring |
 | `Elo` | The formulas: expectation, margin multiplier, series win chance, update |
-| `Replay` | Rates a whole `History` one UTC day at a time, exactly as the daily job would |
+| `DailyRating` | Rates one UTC day at a time and keeps all it needs in the `RatingState`, so the daily job can stop after any day and carry on next run with identical results |
+| `Replay` | Rates a whole `History` one UTC day at a time, for the backtest and the sample site; it knows every team in advance |
 | `Snapshots` | A day's ranked team rows and league rows |
 | `Backtest` | Log-loss scoring, a simple settings search, and rank correlation against known strengths |
 

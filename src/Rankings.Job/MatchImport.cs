@@ -111,6 +111,7 @@ public sealed class MatchImport(RankingsDb db, IReadOnlyList<IArchiveStore> arch
     {
         var ids = new ProviderIds(db);
         var resolved = ids.Resolve(maps);
+        db.SaveSeries(maps);
         db.SaveMaps(resolved.Maps);
         // A map stored now may have been skipped before, e.g. while its team was unassigned.
         db.ClearSkipped(resolved.Maps.SelectMany(m => new[] { m.MapId, m.SeriesId }));

@@ -1,0 +1,130 @@
+name: Daily run
+
+# Fetch, rate, export and deploy once a day. rankings.db lives in R2 between runs; the raw
+# provider responses go to B2. Any failed step stops the run before the live rankings.db is
+# replaced, so a broken run never loses a day: the next one simply carries on from R2's copy.
+
+on:
+  schedule:
+    - cron: "17 4 * * *"
+  workflow_dispatch:
+    inputs:
+      full_recalculation:
+        description: "Rebuild every rating from the archive instead of carrying on from the last settled day"
+        type: boolean
+        default: false
+
+concurrency:
+  group: rankings
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+env:
+  # synthetic until Liquipedia goes live; switching needs an empty rankings.db (the job refuses to mix them)
+  MATCH_SOURCE: ${{ vars.MATCH_SOURCE || 'synthetic' }}
+  BACKUPS_KEPT: ${{ vars.BACKUPS_KEPT || '14' }}
+  R2_BUCKET: ${{ vars.R2_BUCKET }}
+  R2_ENDPOINT: ${{ vars.R2_ENDPOINT }}
+
+jobs:
+  daily:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: 10.0.x
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Download rankings.db and the Liquipedia call log from R2
+        env:
+          AWS_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
+          AWS_DEFAULT_REGION: auto
+        run: |
+          set -euo pipefail
+          # A missing object is fine (the first run); any other failure stops the run.
+          download() {
+            if aws s3api head-object --bucket "$R2_BUCKET" --key "$1" --endpoint-url "$R2_ENDPOINT" > /dev/null 2> head-error.txt; then
+              aws s3 cp "s3://$R2_BUCKET/$1" "$1" --endpoint-url "$R2_ENDPOINT" --only-show-errors
+              echo "Downloaded $1."
+            elif grep -q "(404)" head-error.txt; then
+              echo "$1 is not in R2 yet; starting without it."
+            else
+              cat head-error.txt
+              exit 1
+            fi
+          }
+          download rankings.db
+          download lpdb-calls.json
+          if [ -f rankings.db ]; then echo "HAD_DATABASE=true" >> "$GITHUB_ENV"; fi
+
+      - name: Build the job
+        run: dotnet build src/Rankings.Job -c Release
+
+      - name: Fetch, rate and export
+        env:
+          FULL_RECALCULATION: ${{ inputs.full_recalculation }}
+          B2_KEY_ID: ${{ secrets.B2_KEY_ID }}
+          B2_APPLICATION_KEY: ${{ secrets.B2_APPLICATION_KEY }}
+          B2_ENDPOINT: ${{ vars.B2_ENDPOINT }}
+          B2_BUCKET: ${{ vars.B2_BUCKET }}
+          LIQUIPEDIA_API_KEY: ${{ secrets.LIQUIPEDIA_API_KEY }}
+          LIQUIPEDIA_USER_AGENT: ${{ vars.LIQUIPEDIA_USER_AGENT }}
+        run: |
+          set -euo pipefail
+          arguments=(run --source "$MATCH_SOURCE" --b2 --site-out web/public/data)
+          if [ "$FULL_RECALCULATION" = "true" ]; then arguments+=(--full); fi
+          dotnet run --project src/Rankings.Job -c Release --no-build -- "${arguments[@]}"
+
+      - name: Deploy the site
+        working-directory: web
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CF_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ vars.CF_ACCOUNT_ID }}
+          CF_WORKER_NAME: ${{ vars.CF_WORKER_NAME }}
+        run: npx --yes wrangler@4 deploy --name "$CF_WORKER_NAME"
+
+      - name: Back up the previous rankings.db and keep the latest backups
+        if: env.HAD_DATABASE == 'true'
+        env:
+          AWS_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
+          AWS_DEFAULT_REGION: auto
+        run: |
+          set -euo pipefail
+          backup="db-backups/rankings-$(date -u +%Y-%m-%dT%H%M%SZ).db"
+          aws s3 cp "s3://$R2_BUCKET/rankings.db" "s3://$R2_BUCKET/$backup" --endpoint-url "$R2_ENDPOINT" --only-show-errors
+          echo "Backed up the previous rankings.db to $backup."
+          # Backup names sort by time, so everything before the last $BACKUPS_KEPT goes.
+          aws s3api list-objects-v2 --bucket "$R2_BUCKET" --prefix db-backups/ --endpoint-url "$R2_ENDPOINT" \
+              --query 'Contents[].Key' --output text \
+            | tr '\t' '\n' | { grep -v '^None$' || true; } | sort | head -n -"$BACKUPS_KEPT" \
+            | while read -r old; do
+                aws s3 rm "s3://$R2_BUCKET/$old" --endpoint-url "$R2_ENDPOINT" --only-show-errors
+                echo "Removed $old."
+              done
+
+      - name: Upload rankings.db to R2
+        env:
+          AWS_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
+          AWS_DEFAULT_REGION: auto
+        run: aws s3 cp rankings.db "s3://$R2_BUCKET/rankings.db" --endpoint-url "$R2_ENDPOINT" --only-show-errors
+
+      # Even after a failure: a failed run never uploads rankings.db, and a rerun must still
+      # count the Liquipedia calls this run made.
+      - name: Upload the Liquipedia call log to R2
+        if: always() && hashFiles('lpdb-calls.json') != ''
+        env:
+          AWS_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
+          AWS_DEFAULT_REGION: auto
+        run: aws s3 cp lpdb-calls.json "s3://$R2_BUCKET/lpdb-calls.json" --endpoint-url "$R2_ENDPOINT" --only-show-errors

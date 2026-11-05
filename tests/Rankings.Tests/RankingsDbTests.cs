@@ -11,7 +11,34 @@ public class RankingsDbTests
         "regions", "teams", "team_display", "players", "player_teams", "team_ratings",
         "team_snapshots", "region_snapshots", "run_state", "overrides", "seasons",
         "maps", "map_players", "provider_teams", "provider_players", "skipped_maps",
+        "series", "rated_maps", "roster_events",
     ];
+
+    [Fact]
+    public void Open_MigratesAVersion1FileAndKeepsItsData()
+    {
+        var path = Path.Combine(Path.GetTempPath(), $"rankings-{Guid.NewGuid():N}.db");
+        try
+        {
+            using (var db = RankingsDb.Open(path))
+            {
+                // Back to what a version 1 build left: the schema.sql tables only.
+                db.Execute("DROP TABLE series; DROP TABLE rated_maps; DROP TABLE roster_events; PRAGMA user_version = 1;");
+                db.Execute("INSERT INTO teams (team_id, region_id, created_on) VALUES (7, 'EU', '2026-01-01')");
+            }
+
+            using (var db = RankingsDb.Open(path))
+            {
+                Assert.Equal(RankingsDb.SchemaVersion, Convert.ToInt32(db.Scalar("PRAGMA user_version")));
+                Assert.Equal(AllTables.Order(), Query(db, "SELECT name FROM sqlite_schema WHERE type = 'table' ORDER BY name"));
+                Assert.Equal(1L, db.Scalar("SELECT COUNT(*) FROM teams WHERE team_id = 7"));
+            }
+        }
+        finally
+        {
+            File.Delete(path);
+        }
+    }
 
     static MapRecord SampleMap(string mapId = "XtD9IqfaeJ_R01-M001/1", int roundsA = 7, int roundsB = 8) => new(
         MapId: mapId,

@@ -15,6 +15,7 @@ public sealed record SiteMap(RatedMap Rated, string? Tournament);
 /// <param name="SeasonStart">Start of the current season; regions' international records count from it.</param>
 /// <param name="Days">Daily snapshots, oldest first; the last one is what the site shows.</param>
 /// <param name="Maps">Rated maps the team views and international records draw on.</param>
+/// <param name="DataSource">Where the maps came from (liquipedia or synthetic); the page notes synthetic data.</param>
 public sealed record SiteInput(
     DateTimeOffset UpdatedAt,
     string AlgorithmVersion,
@@ -23,7 +24,8 @@ public sealed record SiteInput(
     IReadOnlyList<SiteRegion> Regions,
     IReadOnlyList<DaySnapshot> Days,
     IReadOnlyList<SiteMap> Maps,
-    IReadOnlyList<RosterEvent> RosterEvents);
+    IReadOnlyList<RosterEvent> RosterEvents,
+    string? DataSource = null);
 
 /// <summary>
 /// Writes the site's data: one JSON file per tab (rankings, regions, movers), one per team for
@@ -65,6 +67,7 @@ public static class SiteExport
             updatedAt = input.UpdatedAt,
             snapshotDate = latest.Date,
             algorithmVersion = input.AlgorithmVersion,
+            dataSource = input.DataSource,
             seasonStart = input.SeasonStart,
             rankedTeams = latest.Teams.Count(team => team.Rank is not null),
         });

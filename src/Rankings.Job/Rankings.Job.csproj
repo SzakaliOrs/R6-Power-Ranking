@@ -12,6 +12,7 @@
 
   <ItemGroup>
     <EmbeddedResource Include="Storage\schema.sql" LogicalName="schema.sql" />
+    <EmbeddedResource Include="Storage\migrations\*.sql" LogicalName="migrations/%(Filename)%(Extension)" />
   </ItemGroup>
 
   <PropertyGroup>
