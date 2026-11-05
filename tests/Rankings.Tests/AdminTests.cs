@@ -188,6 +188,19 @@ public sealed class AdminTests : IDisposable
 
         var team = Assert.Single(store.Teams());
         Assert.Equal(("New Name", "NN", "12.svg"), (team.Name, team.ShortName, team.Logo));
+        Assert.Null(team.LogoDark);
+    }
+
+    [Fact]
+    public void SetDisplay_KeepsASeparateDarkThemeLogo()
+    {
+        var store = StoreWithUnassignedTeams();
+        var teamId = store.CreateTeam("EU", "Team", null, "2025-01-01", null);
+
+        store.SetDisplay(teamId, "2026-01-01", "Team", null, "team-light.svg", "team-dark.svg");
+
+        var team = Assert.Single(store.Teams());
+        Assert.Equal(("team-light.svg", "team-dark.svg"), (team.Logo, team.LogoDark));
     }
 
     [Fact]

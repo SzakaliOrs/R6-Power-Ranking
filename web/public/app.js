@@ -28,15 +28,50 @@ function escapeHtml(text) {
   })[character]);
 }
 
-function logoUrl(team) {
-  return team.logo ? `logos/${encodeURIComponent(team.logo)}` : "logos/fallback.svg";
+function logoUrl(file) {
+  return file ? `logos/${encodeURIComponent(file)}` : "logos/fallback.svg";
+}
+
+/**
+ * The team's logo: one image for every theme, or a light and a dark one when the team has both;
+ * the stylesheet shows the one for the current theme, and the hidden one is never downloaded.
+ */
+function logoImages(team, lazy = true) {
+  const attributes = `alt=""${lazy ? ' loading="lazy"' : ""} onerror="this.onerror=null;this.src='logos/fallback.svg'"`;
+  if (!team.logoDark) return `<img src="${logoUrl(team.logo)}" ${attributes}>`;
+  return `<img class="logo-light" src="${logoUrl(team.logo)}" ${attributes}>`
+    + `<img class="logo-dark" src="${logoUrl(team.logoDark)}" ${attributes}>`;
 }
 
 function teamLink(team, provisional = false) {
   const badge = provisional ? '<span class="badge" title="Fewer than 10 rated maps">Provisional</span>' : "";
-  return `<a class="team" href="#/team/${team.id}"><img src="${logoUrl(team)}" alt="" loading="lazy"
-    onerror="this.onerror=null;this.src='logos/fallback.svg'">${escapeHtml(team.name)}</a>${badge}`;
+  return `<span class="team-cell"><a class="team" href="#/team/${team.id}">${logoImages(team)}${escapeHtml(team.name)}</a>${badge}</span>`;
 }
+
+// Theme: System follows the device; Light and Dark are kept in this browser.
+const themeOrder = ["system", "light", "dark"];
+const themeLabels = { system: "◐ System", light: "☀ Light", dark: "☾ Dark" };
+const themeButton = document.getElementById("theme-toggle");
+
+function applyTheme(theme) {
+  if (theme === "system") delete document.documentElement.dataset.theme;
+  else document.documentElement.dataset.theme = theme;
+  try {
+    if (theme === "system") localStorage.removeItem("theme");
+    else localStorage.setItem("theme", theme);
+  } catch {
+    // Without storage the choice lasts until the page is reloaded.
+  }
+  themeButton.textContent = themeLabels[theme];
+  themeButton.title = `Theme: ${theme}. Click for ${themeOrder[(themeOrder.indexOf(theme) + 1) % themeOrder.length]}.`;
+  themeButton.setAttribute("aria-label", `Theme: ${theme}`);
+}
+
+themeButton.addEventListener("click", () => {
+  const current = document.documentElement.dataset.theme ?? "system";
+  applyTheme(themeOrder[(themeOrder.indexOf(current) + 1) % themeOrder.length]);
+});
+applyTheme(document.documentElement.dataset.theme ?? "system");
 
 function formatRating(value) {
   return Number(value).toFixed(1);
@@ -69,11 +104,11 @@ async function showRankings() {
 
   view.innerHTML = `
     <h1>Rankings</h1>
-    <p class="lead">Every active top-level team by rating, with the change since yesterday.</p>
+    <p class="lead">Every active top-level team by rating, with its change over the last 30 days.</p>
     <div class="filters" role="group" aria-label="Region">${buttons}</div>
     <div class="table-scroll"><table>
       <thead><tr><th class="num">#</th><th>Team</th><th class="hide-narrow">Region</th>
-        <th class="num">Rating</th><th class="num">Change</th><th class="num hide-narrow">Maps</th></tr></thead>
+        <th class="num">Rating</th><th class="num" title="Rating change over the last 30 days">30 days</th><th class="num hide-narrow">Maps</th></tr></thead>
       <tbody>${rows.map(row => `<tr>
         <td class="num">${row.rank}</td>
         <td>${teamLink(row.team, row.provisional)}</td>
@@ -115,7 +150,7 @@ async function showRegions() {
     <p class="lead">Each region's rating is its teams' average strength. APAC shows the average of its three subregions,
       which are rated separately; maps between them count as international.</p>
     <div class="table-scroll"><table>
-      <thead><tr><th>Region</th><th class="num">Rating</th><th class="num">Change</th><th class="num hide-narrow">Teams</th>
+      <thead><tr><th>Region</th><th class="num">Rating</th><th class="num" title="Rating change over the last 30 days">30 days</th><th class="num hide-narrow">Teams</th>
         <th class="num">International maps this season</th><th class="num hide-narrow">Won</th></tr></thead>
       <tbody>${rows}</tbody>
     </table></div>`;
@@ -144,7 +179,11 @@ async function showMovers() {
     ${periods.length === 0 ? '<p class="muted">Not enough history yet.</p>' : ""}`;
 }
 
+// The chart last drawn by historyChart, for the hover readout.
+let chartModel = null;
+
 function historyChart(history) {
+  chartModel = null;
   if (history.length < 2) return '<p class="muted">Not enough history yet.</p>';
   const width = 720, height = 220, padLeft = 44, padRight = 8, padTop = 10, padBottom = 24;
   const times = history.map(point => Date.parse(point.date));
@@ -156,14 +195,86 @@ function historyChart(history) {
   const y = rating => padTop + (height - padTop - padBottom) * (1 - (rating - minRating) / ratingSpan);
   const points = history.map((point, index) => `${x(times[index]).toFixed(1)},${y(point.rating).toFixed(1)}`).join(" ");
   const gridValues = [minRating, minRating + ratingSpan / 2, minRating + ratingSpan];
-  return `<svg class="chart" viewBox="0 0 ${width} ${height}" role="img"
+  chartModel = {
+    history, width, height, padLeft, padRight, padTop, padBottom,
+    pointX: history.map((point, index) => x(times[index])),
+    pointY: history.map(point => y(point.rating)),
+  };
+  return `<svg class="chart" id="history-chart" viewBox="0 0 ${width} ${height}" role="img"
       aria-label="Rating from ${formatRating(ratings[0])} to ${formatRating(ratings[ratings.length - 1])}">
     ${gridValues.map(value => `<line class="grid" x1="${padLeft}" x2="${width - padRight}" y1="${y(value)}" y2="${y(value)}"/>
       <text x="${padLeft - 6}" y="${y(value) + 4}" text-anchor="end">${Math.round(value)}</text>`).join("")}
     <polyline points="${points}" fill="none" stroke="currentColor" stroke-width="2" stroke-linejoin="round"/>
     <text x="${padLeft}" y="${height - 6}">${formatDate(history[0].date)}</text>
     <text x="${width - padRight}" y="${height - 6}" text-anchor="end">${formatDate(history[history.length - 1].date)}</text>
+    <g class="chart-hover" visibility="hidden">
+      <line class="guide" data-guide="vertical" y1="${padTop}" y2="${height - padBottom}"/>
+      <line class="guide" data-guide="horizontal" x1="${padLeft}" x2="${width - padRight}"/>
+      <circle class="dot" r="4.5"/>
+      <g class="tip"><rect rx="5" ry="5"/><text class="tip-date" dy="0"/><text class="tip-value" dy="0"/></g>
+    </g>
+    <rect class="hover-area" x="${padLeft}" y="0" width="${width - padLeft - padRight}" height="${height - padBottom}" fill="transparent"/>
   </svg>`;
+}
+
+/** Follows the pointer over the history chart: the nearest day's date, rating and rank. */
+function enableChartHover() {
+  const svg = document.getElementById("history-chart");
+  if (!svg || !chartModel) return;
+  const model = chartModel;
+  const overlay = svg.querySelector(".chart-hover");
+  const vertical = overlay.querySelector('[data-guide="vertical"]');
+  const horizontal = overlay.querySelector('[data-guide="horizontal"]');
+  const dot = overlay.querySelector(".dot");
+  const tip = overlay.querySelector(".tip");
+  const tipBox = tip.querySelector("rect");
+  const tipDate = tip.querySelector(".tip-date");
+  const tipValue = tip.querySelector(".tip-value");
+
+  const nearestIndex = chartX => {
+    let nearest = 0;
+    for (let index = 1; index < model.pointX.length; index++)
+      if (Math.abs(model.pointX[index] - chartX) < Math.abs(model.pointX[nearest] - chartX)) nearest = index;
+    return nearest;
+  };
+
+  const show = event => {
+    const bounds = svg.getBoundingClientRect();
+    const chartX = (event.clientX - bounds.left) * model.width / bounds.width;
+    const index = nearestIndex(chartX);
+    const point = model.history[index];
+    const [pointX, pointY] = [model.pointX[index], model.pointY[index]];
+
+    vertical.setAttribute("x1", pointX);
+    vertical.setAttribute("x2", pointX);
+    horizontal.setAttribute("y1", pointY);
+    horizontal.setAttribute("y2", pointY);
+    dot.setAttribute("cx", pointX);
+    dot.setAttribute("cy", pointY);
+    tipDate.textContent = formatDate(point.date);
+    tipValue.textContent = `${formatRating(point.rating)}${point.rank ? ` · #${point.rank}` : " · not ranked"}`;
+
+    overlay.setAttribute("visibility", "visible");
+    const padding = 8, lineGap = 16;
+    const textWidth = Math.max(tipDate.getComputedTextLength(), tipValue.getComputedTextLength());
+    const boxWidth = textWidth + padding * 2, boxHeight = lineGap * 2 + padding;
+    // Beside the point, on whichever side has room; never past the top or bottom.
+    const boxX = pointX + 12 + boxWidth <= model.width - model.padRight ? pointX + 12 : pointX - 12 - boxWidth;
+    const boxY = Math.min(Math.max(pointY - boxHeight / 2, model.padTop), model.height - model.padBottom - boxHeight);
+    tipBox.setAttribute("x", boxX);
+    tipBox.setAttribute("y", boxY);
+    tipBox.setAttribute("width", boxWidth);
+    tipBox.setAttribute("height", boxHeight);
+    tipDate.setAttribute("x", boxX + padding);
+    tipDate.setAttribute("y", boxY + padding + 10);
+    tipValue.setAttribute("x", boxX + padding);
+    tipValue.setAttribute("y", boxY + padding + 10 + lineGap);
+  };
+
+  const area = svg.querySelector(".hover-area");
+  area.addEventListener("pointermove", show);
+  area.addEventListener("pointerdown", show);
+  area.addEventListener("pointerleave", () => overlay.setAttribute("visibility", "hidden"));
 }
 
 // The methodology is static text kept in index.html, so it shows even when no data has loaded.
@@ -191,7 +302,7 @@ async function showTeam(teamId) {
   view.innerHTML = `
     <p><a href="#/rankings">← Rankings</a></p>
     <div class="team-head">
-      <img src="${logoUrl(team)}" alt="" onerror="this.onerror=null;this.src='logos/fallback.svg'">
+      ${logoImages(team, false)}
       <div>
         <h1>${escapeHtml(team.name)}${data.provisional ? '<span class="badge">Provisional</span>' : ""}</h1>
         <div class="muted">${escapeHtml(regionLabel(team))}</div>
@@ -200,7 +311,7 @@ async function showTeam(teamId) {
     <div class="stats">
       <div class="stat"><div class="value">${rank}</div><div class="label">Rank</div></div>
       <div class="stat"><div class="value">${formatRating(data.rating)}</div><div class="label">Rating</div></div>
-      <div class="stat"><div class="value">${formatChange(data.change)}</div><div class="label">Since yesterday</div></div>
+      <div class="stat"><div class="value">${formatChange(data.change)}</div><div class="label">Last 30 days</div></div>
       <div class="stat"><div class="value">${data.maps}</div><div class="label">Rated maps</div></div>
     </div>
     <h2>Rating history</h2>
@@ -221,6 +332,7 @@ async function showTeam(teamId) {
     ${data.roster.length === 0 ? '<p class="muted">None recorded.</p>' : `<ul>${data.roster.map(change => `
       <li>${formatDate(change.at)}: ${escapeHtml(rosterLabels[change.kind] ?? change.kind)}${change.newPlayers > 0
         ? ` (${change.newPlayers} new ${change.newPlayers === 1 ? "player" : "players"})` : ""}</li>`).join("")}</ul>`}`;
+  enableChartHover();
 }
 
 async function route() {

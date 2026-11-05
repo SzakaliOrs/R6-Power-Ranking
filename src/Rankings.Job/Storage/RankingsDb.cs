@@ -11,7 +11,7 @@ namespace Rankings.Job.Storage;
 public sealed class RankingsDb : IDisposable
 {
     /// <summary>schema.sql is version 1; each file in migrations/ named NNN-*.sql takes it to version NNN.</summary>
-    public const int SchemaVersion = 2;
+    public const int SchemaVersion = 3;
 
     public SqliteConnection Connection { get; }
 

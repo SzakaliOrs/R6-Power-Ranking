@@ -92,6 +92,20 @@ public sealed class S3ArchiveStore(IAmazonS3 s3, string bucket) : IArchiveStore
         }, cancellationToken);
     }
 
+    /// <summary>Whether anything is stored under the key, without downloading it.</summary>
+    public async Task<bool> ExistsAsync(string key, CancellationToken cancellationToken = default)
+    {
+        try
+        {
+            await s3.GetObjectMetadataAsync(bucket, key, cancellationToken);
+            return true;
+        }
+        catch (AmazonS3Exception e) when (e.StatusCode == HttpStatusCode.NotFound)
+        {
+            return false;
+        }
+    }
+
     public async Task<byte[]?> ReadAsync(string key, CancellationToken cancellationToken = default)
     {
         try

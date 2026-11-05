@@ -9,6 +9,7 @@
   --down: #b3261e;
   --badge-bg: #fff1d6;
   --badge-fg: #7a4d00;
+  --row-alt: #f6f7f9;
   color-scheme: light;
 }
 
@@ -24,6 +25,7 @@
     --down: #ff8a80;
     --badge-bg: #3d2f12;
     --badge-fg: #ffd58a;
+    --row-alt: #171a1f;
     color-scheme: dark;
   }
 }
@@ -39,6 +41,7 @@
   --down: #ff8a80;
   --badge-bg: #3d2f12;
   --badge-fg: #ffd58a;
+  --row-alt: #171a1f;
   color-scheme: dark;
 }
 
@@ -54,18 +57,31 @@ body {
 }
 
 a { color: var(--accent); text-decoration: none; }
-a:hover { text-decoration: underline; }
+a:hover { text-decoration: underline; text-underline-offset: 3px; }
+/* Links inside running text are underlined all the time, so they never read as plain text. */
+.prose a, .lead a, .site-footer a, main p a {
+  text-decoration: underline; text-decoration-thickness: 1px; text-underline-offset: 3px;
+  text-decoration-color: color-mix(in srgb, var(--accent) 45%, transparent);
+}
+.prose a:hover, .lead a:hover, .site-footer a:hover, main p a:hover { text-decoration-color: var(--accent); }
 
 .wrap { max-width: 960px; margin: 0 auto; padding: 0 16px; }
 .muted { color: var(--muted); }
 
-.site-header { border-bottom: 1px solid var(--line); background: var(--surface); }
+/* Stays at the top while the page scrolls, so the tabs are always in reach. */
+.site-header { position: sticky; top: 0; z-index: 10; border-bottom: 1px solid var(--line); background: var(--surface); }
 .header-row { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 8px; padding-top: 12px; padding-bottom: 12px; }
 .brand { font-weight: 700; font-size: 18px; color: var(--fg); }
 .tabs { display: flex; gap: 4px; }
 .tabs a { padding: 6px 12px; border-radius: 6px; color: var(--muted); font-weight: 500; }
 .tabs a.active { background: var(--bg); color: var(--fg); box-shadow: inset 0 0 0 1px var(--line); }
 .tabs a:hover { text-decoration: none; color: var(--fg); }
+.header-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
+.theme-toggle {
+  font: inherit; font-size: 13px; padding: 4px 10px; border-radius: 999px; cursor: pointer;
+  border: 1px solid var(--line); background: var(--bg); color: var(--fg); white-space: nowrap;
+}
+.theme-toggle:hover { border-color: var(--muted); }
 
 main { padding-top: 20px; padding-bottom: 24px; min-height: 60vh; }
 h1 { font-size: 22px; margin: 0 0 4px; }
@@ -85,12 +101,25 @@ table { width: 100%; border-collapse: collapse; }
 th, td { padding: 8px 6px; border-bottom: 1px solid var(--line); text-align: left; white-space: nowrap; }
 th { font-size: 12px; text-transform: uppercase; letter-spacing: 0.03em; color: var(--muted); font-weight: 600; }
 td.num, th.num { text-align: right; font-variant-numeric: tabular-nums; }
+tbody tr:nth-child(even) { background: var(--row-alt); }
 tr.subregion td:first-child { padding-left: 28px; }
 tr.subregion td { color: var(--muted); }
-tr.subregion td a { color: inherit; }
 
-.team { display: inline-flex; align-items: center; gap: 8px; color: var(--fg); }
+/* Team link and its Provisional badge on one line, centred on each other. */
+.team-cell { display: inline-flex; align-items: center; gap: 6px; }
+.team-cell .badge { margin-left: 0; }
+/* Team names are links: the accent colour shows it, the underline confirms it on hover. */
+.team { display: inline-flex; align-items: center; gap: 8px; color: var(--accent); font-weight: 500; }
+.team:hover { text-decoration: underline; text-underline-offset: 3px; }
 .team img { width: 24px; height: 24px; object-fit: contain; flex: none; }
+/* Teams with a light and a dark logo: show the one for the theme in use (system or chosen). */
+.logo-dark { display: none; }
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) .logo-light { display: none; }
+  :root:not([data-theme="light"]) .logo-dark { display: inline-block; }
+}
+:root[data-theme="dark"] .logo-light { display: none; }
+:root[data-theme="dark"] .logo-dark { display: inline-block; }
 .badge {
   display: inline-block; font-size: 11px; font-weight: 600; padding: 1px 6px; border-radius: 4px;
   background: var(--badge-bg); color: var(--badge-fg); margin-left: 6px; vertical-align: middle;
@@ -111,6 +140,14 @@ tr.subregion td a { color: inherit; }
 .chart { width: 100%; height: auto; display: block; color: var(--accent); }
 .chart text { fill: var(--muted); font-size: 11px; }
 .chart .grid { stroke: var(--line); }
+/* Hover readout: guides to both axes, the point, and its date, rating and rank. */
+.chart .hover-area { cursor: crosshair; touch-action: pan-y; }
+.chart .guide { stroke: var(--muted); stroke-width: 1; stroke-dasharray: 3 3; pointer-events: none; }
+.chart .dot { fill: var(--accent); stroke: var(--bg); stroke-width: 2; pointer-events: none; }
+.chart .tip { pointer-events: none; }
+.chart .tip rect { fill: var(--bg); stroke: var(--line); }
+.chart .tip text { fill: var(--fg); font-size: 12px; }
+.chart .tip .tip-value { font-weight: 600; font-variant-numeric: tabular-nums; }
 
 .prose { max-width: 70ch; }
 .prose p { margin: 0 0 12px; }

@@ -212,7 +212,8 @@ async function showTeams() {
         <td class="num">${team.teamId}</td>
         <td>${team.league}</td>
         <td data-sort-value="${escapeHtml(team.name ?? "")}">${escapeHtml(team.name ?? "–")} <span class="muted">${escapeHtml(team.shortName ?? "")}</span></td>
-        <td data-sort-value="${escapeHtml(team.logo ?? "")}">${team.logo ?`<code>${escapeHtml(team.logo)}</code>` : '<span class="muted">fallback</span>'}</td>
+        <td data-sort-value="${escapeHtml(team.logo ?? team.logoDark ?? "")}">${team.logo ? `<code>${escapeHtml(team.logo)}</code>` : '<span class="muted">fallback</span>'}${
+          team.logoDark ? `<br><span class="muted">dark:</span> <code>${escapeHtml(team.logoDark)}</code>` : ""}</td>
         <td>${team.status}</td>
         <td data-sort-value="${escapeHtml(team.providerKeys[0] ?? "")}">${team.providerKeys.map(key => `<code>${escapeHtml(key)}</code>`).join("<br>") || '<span class="muted">none</span>'}</td>
         <td><details><summary>Edit</summary>
@@ -228,7 +229,8 @@ async function showTeams() {
             <input name="validFrom" type="date" value="${today()}" required aria-label="From">
             <input name="name" value="${escapeHtml(team.name ?? "")}" required aria-label="Name">
             <input name="shortName" value="${escapeHtml(team.shortName ?? "")}" placeholder="Short name (blank: full name)" aria-label="Short name">
-            <input name="logo" value="${escapeHtml(team.logo ?? "")}" placeholder="logo file, e.g. 12.svg" aria-label="Logo">
+            <input name="logo" value="${escapeHtml(team.logo ?? "")}" placeholder="logo (all themes / light), e.g. 12.svg" aria-label="Logo">
+            <input name="logoDark" value="${escapeHtml(team.logoDark ?? "")}" placeholder="dark-theme logo (optional)" aria-label="Dark theme logo">
             <button>Save display</button>
           </form>
           <form class="inline" data-status="${team.teamId}">

@@ -18,6 +18,7 @@ dotnet run --project src/Rankings.Job -- <command> [options]
 | `fetch --from D --to D` | Fetches finished maps for those UTC days, archives each day, stores the maps | Yes |
 | `backfill [--from D] [--to D] [--restart]` | Fetches a month at a time from 2023-01-01 (or `--from`) to yesterday, continuing where it stopped. It stops cleanly when the hourly budget is spent. | Yes |
 | `reparse --from D --to D` | Reads archived days back through the parser, e.g. after a team is assigned, so nothing is fetched again | No |
+| `upload-archive` | Copies the local archive's real days (`matches/...`) to B2, e.g. after a backfill without `--b2`; days B2 already has are skipped | No |
 | `backtest --synthetic [--seed N] [--seasons N]` | Replays synthetic seasons: the first is the warm-up, the middle ones tune the settings, the last checks them. Reads and writes nothing. | No |
 | `sample-site [--seed N] [--out DIR]` | Writes the site's JSON from synthetic seasons (default `web/public/data`) | No |
 

@@ -54,6 +54,7 @@ CREATE TABLE team_display (
     name        TEXT NOT NULL,
     short_name  TEXT,
     logo        TEXT,                           -- file under logos/; NULL uses the fallback
+                                                -- (migration 003 adds logo_dark for the dark theme)
     PRIMARY KEY (team_id, valid_from)
 ) STRICT;
 
