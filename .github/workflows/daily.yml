@@ -101,7 +101,8 @@ jobs:
         run: |
           set -euo pipefail
           backup="db-backups/rankings-$(date -u +%Y-%m-%dT%H%M%SZ).db"
-          aws s3 cp "s3://$R2_BUCKET/rankings.db" "s3://$R2_BUCKET/$backup" --endpoint-url "$R2_ENDPOINT" --only-show-errors
+          # --copy-props none: R2 has no object tagging, and the CLI's default copy asks for the tags.
+          aws s3 cp "s3://$R2_BUCKET/rankings.db" "s3://$R2_BUCKET/$backup" --copy-props none --endpoint-url "$R2_ENDPOINT" --only-show-errors
           echo "Backed up the previous rankings.db to $backup."
           # Backup names sort by time, so everything before the last $BACKUPS_KEPT goes.
           aws s3api list-objects-v2 --bucket "$R2_BUCKET" --prefix db-backups/ --endpoint-url "$R2_ENDPOINT" \

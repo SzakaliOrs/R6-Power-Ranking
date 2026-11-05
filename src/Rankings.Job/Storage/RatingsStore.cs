@@ -274,7 +274,7 @@ public sealed class RatingsStore(RankingsDb db)
     /// </summary>
     public List<SiteTeam> SiteTeams(DateOnly day) =>
         Rows("""
-            SELECT t.team_id, t.region_id, d.name, d.short_name, d.logo
+            SELECT t.team_id, t.region_id, d.name, d.short_name, d.logo, d.logo_dark
             FROM teams t
             LEFT JOIN team_display d ON d.team_id = t.team_id AND d.valid_from = (
                 SELECT MAX(valid_from) FROM team_display WHERE team_id = t.team_id AND valid_from <= $day)
@@ -284,7 +284,8 @@ public sealed class RatingsStore(RankingsDb db)
             {
                 var name = reader.IsDBNull(2) ? $"Team {reader.GetInt32(0)}" : reader.GetString(2);
                 var shortName = reader.IsDBNull(3) || string.IsNullOrWhiteSpace(reader.GetString(3)) ? name : reader.GetString(3);
-                return new SiteTeam(reader.GetInt32(0), name, shortName, reader.IsDBNull(4) ? null : reader.GetString(4), reader.GetString(1));
+                return new SiteTeam(reader.GetInt32(0), name, shortName, reader.IsDBNull(4) ? null : reader.GetString(4), reader.GetString(1),
+                    reader.IsDBNull(5) ? null : reader.GetString(5));
             },
             ("$day", Text(day)));
 

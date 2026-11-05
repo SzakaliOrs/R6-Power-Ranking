@@ -4,7 +4,9 @@ using Rankings.Core;
 namespace Rankings.Job.Site;
 
 /// <param name="Logo">File under logos/; null shows the fallback logo.</param>
-public sealed record SiteTeam(int TeamId, string Name, string? ShortName, string? Logo, string League);
+/// <param name="Logo">The logo for light mode, and for dark mode too when there is no <paramref name="LogoDark"/>.</param>
+/// <param name="LogoDark">A separate logo for the dark theme, or null to use <paramref name="Logo"/> in both.</param>
+public sealed record SiteTeam(int TeamId, string Name, string? ShortName, string? Logo, string League, string? LogoDark = null);
 
 /// <param name="ParentId">The display region a league belongs to (APAC for its subregions); null for a display region.</param>
 public sealed record SiteRegion(string RegionId, string Name, string? ParentId);
@@ -45,6 +47,8 @@ public static class SiteExport
     const int MoversShown = 10;
     const int RecentMapsShown = 20;
     const int DailyHistoryDays = 365;
+    /// <summary>The change shown for teams and regions covers this many days.</summary>
+    public const int ChangeDays = 30;
 
     static readonly JsonSerializerOptions Json = new() { PropertyNamingPolicy = JsonNamingPolicy.CamelCase };
 
@@ -61,6 +65,7 @@ public static class SiteExport
         var latest = input.Days[^1];
         var teams = input.Teams.ToDictionary(team => team.TeamId);
         var regions = input.Regions.ToDictionary(region => region.RegionId);
+        var ratingsBefore = RatingsBefore(input, latest);
 
         WriteFile(Path.Combine(dataDirectory, "meta.json"), new
         {
@@ -70,6 +75,7 @@ public static class SiteExport
             dataSource = input.DataSource,
             seasonStart = input.SeasonStart,
             rankedTeams = latest.Teams.Count(team => team.Rank is not null),
+            changeDays = ChangeDays,
         });
         WriteFile(Path.Combine(dataDirectory, "rankings.json"), new
         {
@@ -77,20 +83,45 @@ public static class SiteExport
             {
                 rank = snapshot.Rank,
                 rating = Round(snapshot.Rating),
-                change = Round(snapshot.Change),
+                change = Round(snapshot.Rating - ratingsBefore.Teams[snapshot.TeamId]),
                 maps = snapshot.RatedMaps,
                 provisional = snapshot.Provisional,
                 team = TeamCard(teams[snapshot.TeamId], regions),
             }),
         });
-        WriteFile(Path.Combine(dataDirectory, "regions.json"), new { regions = RegionRows(input, latest, regions) });
+        WriteFile(Path.Combine(dataDirectory, "regions.json"), new { regions = RegionRows(input, latest, regions, ratingsBefore.Leagues) });
         WriteFile(Path.Combine(dataDirectory, "movers.json"), new
         {
             periods = new[] { 7, 30 }.Select(days => Movers(input, latest, days, teams, regions)).Where(period => period is not null),
         });
 
         foreach (var snapshot in latest.Teams)
-            WriteFile(Path.Combine(teamsDirectory, $"{snapshot.TeamId}.json"), TeamView(input, snapshot, teams, regions));
+            WriteFile(Path.Combine(teamsDirectory, $"{snapshot.TeamId}.json"),
+                TeamView(input, snapshot, teams, regions, snapshot.Rating - ratingsBefore.Teams[snapshot.TeamId]));
+    }
+
+    /// <summary>
+    /// Every team's and league's rating <see cref="ChangeDays"/> days before the latest snapshot (the
+    /// last snapshot on or before that day), for the change shown. One that first appears later
+    /// uses its first rating, so its change is everything since it started.
+    /// </summary>
+    static (Dictionary<int, double> Teams, Dictionary<string, double> Leagues) RatingsBefore(SiteInput input, DaySnapshot latest)
+    {
+        var since = latest.Date.AddDays(-ChangeDays);
+        var startIndex = 0;
+        for (var index = 0; index < input.Days.Count; index++)
+            if (input.Days[index].Date <= since)
+                startIndex = index;
+        var teamRatings = new Dictionary<int, double>();
+        var leagueRatings = new Dictionary<string, double>();
+        for (var index = startIndex; index < input.Days.Count; index++)
+        {
+            foreach (var team in input.Days[index].Teams)
+                teamRatings.TryAdd(team.TeamId, team.Rating);
+            foreach (var league in input.Days[index].Leagues)
+                leagueRatings.TryAdd(league.LeagueId, league.Rating);
+        }
+        return (teamRatings, leagueRatings);
     }
 
     static object TeamCard(SiteTeam team, Dictionary<string, SiteRegion> regions) => new
@@ -99,15 +130,18 @@ public static class SiteExport
         name = team.Name,
         shortName = team.ShortName,
         logo = team.Logo,
+        logoDark = team.LogoDark,
         league = team.League,
         leagueName = regions[team.League].Name,
         region = DisplayRegion(team.League, regions),
     };
 
     /// <summary>Display regions by rating; one with subregions (APAC) shows their average and lists them beneath it.</summary>
-    static IEnumerable<object> RegionRows(SiteInput input, DaySnapshot latest, Dictionary<string, SiteRegion> regions)
+    static IEnumerable<object> RegionRows(SiteInput input, DaySnapshot latest, Dictionary<string, SiteRegion> regions,
+        Dictionary<string, double> leagueRatingsBefore)
     {
         var leagueRatings = latest.Leagues.ToDictionary(league => league.LeagueId);
+        double LeagueChange(string leagueId) => leagueRatings[leagueId].Rating - leagueRatingsBefore[leagueId];
         var teamLeagues = input.Teams.ToDictionary(team => team.TeamId, team => team.League);
         var rankedPerLeague = latest.Teams.Where(team => team.Rank is not null).ToLookup(team => teamLeagues[team.TeamId]);
         var seasonMaps = input.Maps.Where(map => input.SeasonStart is not { } start || map.Rated.Map.PlayedAt >= start).ToList();
@@ -137,7 +171,7 @@ public static class SiteExport
                 id = league.RegionId,
                 name = league.Name,
                 rating = Round(leagueRatings[league.RegionId].Rating),
-                change = Round(leagueRatings[league.RegionId].Change),
+                change = Round(LeagueChange(league.RegionId)),
                 teams = rankedPerLeague[league.RegionId].Count(),
                 international = new { won, lost },
                 subregions = Array.Empty<object>(),
@@ -161,7 +195,7 @@ public static class SiteExport
                 id = region.RegionId,
                 name = region.Name,
                 rating = Round(rating),
-                change = Round(subregions.Average(league => leagueRatings[league.RegionId].Change)),
+                change = Round(subregions.Average(league => LeagueChange(league.RegionId))),
                 teams = subregions.Sum(league => rankedPerLeague[league.RegionId].Count()),
                 international = new { won, lost },
                 subregions = subregions.OrderByDescending(league => leagueRatings[league.RegionId].Rating).Select(LeagueRow),
@@ -197,7 +231,8 @@ public static class SiteExport
         };
     }
 
-    static object TeamView(SiteInput input, TeamSnapshot snapshot, Dictionary<int, SiteTeam> teams, Dictionary<string, SiteRegion> regions)
+    static object TeamView(SiteInput input, TeamSnapshot snapshot, Dictionary<int, SiteTeam> teams, Dictionary<string, SiteRegion> regions,
+        double change)
     {
         var teamId = snapshot.TeamId;
         var latestDate = input.Days[^1].Date;
@@ -239,7 +274,7 @@ public static class SiteExport
             team = TeamCard(teams[teamId], regions),
             rank = snapshot.Rank,
             rating = Round(snapshot.Rating),
-            change = Round(snapshot.Change),
+            change = Round(change),
             maps = snapshot.RatedMaps,
             provisional = snapshot.Provisional,
             history,

@@ -7,17 +7,27 @@
   <meta name="description" content="Daily power rankings of top-level Rainbow Six Siege teams, rated map by map.">
   <link rel="icon" href="logos/fallback.svg" type="image/svg+xml">
   <link rel="stylesheet" href="styles.css">
+  <script>
+    // The saved theme, set before the page paints so it never flashes the other one.
+    try {
+      var savedTheme = localStorage.getItem("theme");
+      if (savedTheme === "light" || savedTheme === "dark") document.documentElement.dataset.theme = savedTheme;
+    } catch (storageError) {}
+  </script>
 </head>
 <body>
   <header class="site-header">
     <div class="wrap header-row">
       <a class="brand" href="#/rankings">R6 Power Ranking</a>
-      <nav class="tabs" aria-label="Sections">
-        <a href="#/rankings" data-tab="rankings">Rankings</a>
-        <a href="#/regions" data-tab="regions">Regions</a>
-        <a href="#/movers" data-tab="movers">Movers</a>
-        <a href="#/method" data-tab="method">Method</a>
-      </nav>
+      <div class="header-actions">
+        <nav class="tabs" aria-label="Sections">
+          <a href="#/rankings" data-tab="rankings">Rankings</a>
+          <a href="#/regions" data-tab="regions">Regions</a>
+          <a href="#/movers" data-tab="movers">Movers</a>
+          <a href="#/method" data-tab="method">Method</a>
+        </nav>
+        <button type="button" id="theme-toggle" class="theme-toggle">◐ System</button>
+      </div>
     </div>
   </header>
   <main id="view" class="wrap" aria-live="polite">
@@ -26,6 +36,8 @@
   <footer class="wrap site-footer">
     <p id="updated" class="muted"></p>
     <p class="muted">Every top-level map counts, rated with a two-layer Elo: region rating plus the team's offset within it. Rankings change once a day.</p>
+    <p class="muted">Match data from <a href="https://liquipedia.net/rainbowsix/" rel="noopener">Liquipedia</a>,
+      licensed under <a href="https://creativecommons.org/licenses/by-sa/3.0/" rel="noopener">CC BY-SA 3.0</a>.</p>
   </footer>
   <template id="method-template">
     <article class="prose">

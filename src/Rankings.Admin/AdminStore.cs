@@ -7,7 +7,7 @@ namespace Rankings.Admin;
 
 public sealed record AdminTeam(
     int TeamId, string League, string Status, string CreatedOn,
-    string? Name, string? ShortName, string? Logo, IReadOnlyList<string> ProviderKeys);
+    string? Name, string? ShortName, string? Logo, IReadOnlyList<string> ProviderKeys, string? LogoDark = null);
 
 public sealed record AdminPlayer(int PlayerId, string Name, IReadOnlyList<string> ProviderKeys);
 
@@ -64,14 +64,15 @@ public sealed class AdminStore(string databasePath)
             .ToLookup(row => row.TeamId, row => row.Key);
         // The display row in effect today: the latest one that has started.
         return Rows(db, """
-            SELECT t.team_id, t.region_id, t.status, t.created_on, d.name, d.short_name, d.logo
+            SELECT t.team_id, t.region_id, t.status, t.created_on, d.name, d.short_name, d.logo, d.logo_dark
             FROM teams t
             LEFT JOIN team_display d ON d.team_id = t.team_id AND d.valid_from = (
                 SELECT MAX(valid_from) FROM team_display WHERE team_id = t.team_id AND valid_from <= date('now'))
             ORDER BY t.region_id, d.name, t.team_id
             """,
             reader => new AdminTeam(reader.GetInt32(0), reader.GetString(1), reader.GetString(2), reader.GetString(3),
-                NullableString(reader, 4), NullableString(reader, 5), NullableString(reader, 6), [.. keys[reader.GetInt32(0)]]));
+                NullableString(reader, 4), NullableString(reader, 5), NullableString(reader, 6), [.. keys[reader.GetInt32(0)]],
+                NullableString(reader, 7)));
     }
 
     /// <summary>
@@ -245,17 +246,22 @@ public sealed class AdminStore(string databasePath)
         }
     }
 
-    /// <summary>Name, short name and logo shown from <paramref name="validFrom"/> on; earlier days keep their names.</summary>
-    public void SetDisplay(int teamId, string validFrom, string name, string? shortName, string? logo)
+    /// <summary>
+    /// Name, short name and logos shown from <paramref name="validFrom"/> on; earlier days keep their
+    /// names. <paramref name="logo"/> serves both themes unless <paramref name="logoDark"/> is given for dark.
+    /// </summary>
+    public void SetDisplay(int teamId, string validFrom, string name, string? shortName, string? logo, string? logoDark = null)
     {
         RequireDate(validFrom, "The date");
         RequireText(name, "The team name");
         using var db = Open();
         RequireTeam(db, teamId);
         Execute(db, null, """
-            INSERT INTO team_display (team_id, valid_from, name, short_name, logo) VALUES ($team, $from, $name, $short, $logo)
-            ON CONFLICT (team_id, valid_from) DO UPDATE SET name = excluded.name, short_name = excluded.short_name, logo = excluded.logo
-            """, ("$team", teamId), ("$from", validFrom), ("$name", name.Trim()), ("$short", Blank(shortName)), ("$logo", Blank(logo)));
+            INSERT INTO team_display (team_id, valid_from, name, short_name, logo, logo_dark) VALUES ($team, $from, $name, $short, $logo, $logoDark)
+            ON CONFLICT (team_id, valid_from) DO UPDATE SET
+                name = excluded.name, short_name = excluded.short_name, logo = excluded.logo, logo_dark = excluded.logo_dark
+            """, ("$team", teamId), ("$from", validFrom), ("$name", name.Trim()), ("$short", Blank(shortName)),
+            ("$logo", Blank(logo)), ("$logoDark", Blank(logoDark)));
     }
 
     /// <summary>

@@ -61,7 +61,7 @@ api.MapPost("/teams", (NewTeam request) =>
     new { teamId = store.CreateTeam(request.League, request.Name, request.ShortName, request.CreatedOn, request.ProviderKey) });
 api.MapPost("/teams/{teamId:int}/display", (int teamId, TeamDisplay request) =>
 {
-    store.SetDisplay(teamId, request.ValidFrom, request.Name, request.ShortName, request.Logo);
+    store.SetDisplay(teamId, request.ValidFrom, request.Name, request.ShortName, request.Logo, request.LogoDark);
     return Results.NoContent();
 });
 api.MapPost("/teams/{teamId:int}/league", (int teamId, TeamLeague request) =>
@@ -136,7 +136,7 @@ string? ArgumentAfter(string name)
 }
 
 record NewTeam(string League, string Name, string? ShortName, string CreatedOn, string? ProviderKey);
-record TeamDisplay(string ValidFrom, string Name, string? ShortName, string? Logo);
+record TeamDisplay(string ValidFrom, string Name, string? ShortName, string? Logo, string? LogoDark = null);
 record TeamStatus(string Status, string EffectiveOn, string? Note);
 record TeamStatuses(int[] TeamIds, string Status, string? EffectiveOn, string? Note, bool AfterLastMap = false);
 record TeamLeague(string League);

@@ -11,12 +11,14 @@ const string Usage = """
       Rankings.Job fetch    --from YYYY-MM-DD --to YYYY-MM-DD [options] [--b2]
       Rankings.Job backfill [--from YYYY-MM-DD] [--to YYYY-MM-DD] [options] [--b2] [--restart]
       Rankings.Job reparse  --from YYYY-MM-DD --to YYYY-MM-DD [options] [--b2]
+      Rankings.Job upload-archive [--archive-dir DIR]
       Rankings.Job backtest --synthetic [--seed N] [--seasons N]
       Rankings.Job sample-site [--seed N] [--out web/public/data]
 
     Dates are whole UTC days, both included; nothing before 2023-01-01 is fetched.
     run is the daily run: it fetches yesterday and the 2 days before, rates every day since the
     last settled one and writes the site's JSON; --full rebuilds every rating from the archive.
+    upload-archive copies the local archive's real days (matches/...) to B2, skipping days B2 already has.
     fetch and backfill call Liquipedia; reparse only reads the archive; backtest --synthetic
     simulates its seasons and touches nothing; sample-site writes the site's JSON from synthetic seasons.
 
@@ -50,6 +52,7 @@ try
         ["fetch", .. var rest] => await Fetch(Cli.Parse(rest)),
         ["backfill", .. var rest] => await Backfill(Cli.Parse(rest)),
         ["reparse", .. var rest] => await Reparse(Cli.Parse(rest)),
+        ["upload-archive", .. var rest] => await UploadArchive(Cli.Parse(rest)),
         ["backtest", .. var rest] => RunBacktest(Cli.Parse(rest)),
         ["sample-site", .. var rest] => WriteSampleSite(Cli.Parse(rest)),
         _ => Fail(Usage, 2),
@@ -194,12 +197,45 @@ async Task<int> Reparse(Cli cli)
     var (from, to) = (cli.Date("from"), cli.Date("to"));
     CheckRange(from, to);
     using var db = RankingsDb.Open(cli.Value("db") ?? "rankings.db");
-    var archive = cli.Flag("b2") ? B2() : new LocalArchiveStore(cli.Value("archive-dir") ?? "archive");
+    IArchiveStore archive = cli.Flag("b2") ? B2() : new LocalArchiveStore(cli.Value("archive-dir") ?? "archive");
 
     var summary = await new MatchImport(db, []).ReparseAsync(archive, from, to);
     Report($"Reparsed from {archive.Name}", summary, null);
     if (summary.MissingDays is { Count: > 0 } missing)
         Console.WriteLine($"No archive file for {missing.Count} day(s), first {missing[0]:yyyy-MM-dd}.");
+    return 0;
+}
+
+// Copies the local archive's real days to B2, e.g. after a backfill run without --b2. A day B2
+// already has is left alone, since B2 may hold a newer copy from the daily runs. Synthetic days
+// (under synthetic/) stay local.
+async Task<int> UploadArchive(Cli cli)
+{
+    var root = cli.Value("archive-dir") ?? "archive";
+    var matchesFolder = Path.Combine(root, "matches");
+    if (!Directory.Exists(matchesFolder))
+        return Fail($"There is no {matchesFolder} folder to upload.", 1);
+    var b2 = B2();
+    var keys = Directory.EnumerateFiles(matchesFolder, "*.json.gz", SearchOption.AllDirectories)
+        .Select(path => Path.GetRelativePath(root, path).Replace(Path.DirectorySeparatorChar, '/'))
+        .Order(StringComparer.Ordinal)
+        .ToList();
+    Log($"Uploading {keys.Count} archived day(s) from {Path.GetFullPath(root)} to {b2.Name}; days already there are skipped.");
+
+    var (uploaded, alreadyThere) = (0, 0);
+    foreach (var (key, position) in keys.Select((key, index) => (key, index + 1)))
+    {
+        if (await b2.ExistsAsync(key))
+            alreadyThere++;
+        else
+        {
+            await b2.WriteAsync(key, await File.ReadAllBytesAsync(Path.Combine(root, key.Replace('/', Path.DirectorySeparatorChar))));
+            uploaded++;
+        }
+        if (position % 100 == 0 || position == keys.Count)
+            Log($"{position}/{keys.Count} checked: {uploaded} uploaded, {alreadyThere} already in B2.");
+    }
+    Console.WriteLine($"Done: {uploaded} day(s) uploaded, {alreadyThere} already in B2.");
     return 0;
 }
 
@@ -262,7 +298,7 @@ List<IArchiveStore> Archives(Cli cli)
     return stores;
 }
 
-IArchiveStore B2() =>
+S3ArchiveStore B2() =>
     S3ArchiveStore.ForB2(Env("B2_KEY_ID"), Env("B2_APPLICATION_KEY"), Env("B2_ENDPOINT"), Env("B2_BUCKET"));
 
 string Env(string name) =>

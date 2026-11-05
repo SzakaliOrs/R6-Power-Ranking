@@ -91,6 +91,30 @@ public sealed class SiteExportTests : IDisposable
     // Site files
 
     [Fact]
+    public void Write_ChangeCoversTheLastThirtyDays()
+    {
+        SiteExport.Write(Sample.Value, _directory);
+
+        var days = Sample.Value.Days;
+        var latest = days[^1];
+        var monthAgo = days.Last(day => day.Date <= latest.Date.AddDays(-SiteExport.ChangeDays));
+        var ratingsMonthAgo = monthAgo.Teams.ToDictionary(team => team.TeamId, team => team.Rating);
+        var latestRatings = latest.Teams.ToDictionary(team => team.TeamId, team => team.Rating);
+        var rows = Read("rankings.json").GetProperty("teams").EnumerateArray().ToList();
+        var checkedRows = 0;
+        foreach (var row in rows)
+        {
+            var teamId = row.GetProperty("team").GetProperty("id").GetInt32();
+            if (!ratingsMonthAgo.TryGetValue(teamId, out var before))
+                continue;
+            Assert.Equal(Math.Round(latestRatings[teamId] - before, 1), row.GetProperty("change").GetDouble(), 9);
+            checkedRows++;
+        }
+        Assert.True(checkedRows > 0);
+        Assert.Equal(SiteExport.ChangeDays, Read("meta.json").GetProperty("changeDays").GetInt32());
+    }
+
+    [Fact]
     public void Write_RankingsListEveryRankedTeamInOrder()
     {
         SiteExport.Write(Sample.Value, _directory);

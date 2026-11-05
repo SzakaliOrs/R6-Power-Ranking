@@ -23,7 +23,11 @@ public class RankingsDbTests
             using (var db = RankingsDb.Open(path))
             {
                 // Back to what a version 1 build left: the schema.sql tables only.
-                db.Execute("DROP TABLE series; DROP TABLE rated_maps; DROP TABLE roster_events; PRAGMA user_version = 1;");
+                db.Execute("""
+                    DROP TABLE series; DROP TABLE rated_maps; DROP TABLE roster_events;
+                    ALTER TABLE team_display DROP COLUMN logo_dark;
+                    PRAGMA user_version = 1;
+                    """);
                 db.Execute("INSERT INTO teams (team_id, region_id, created_on) VALUES (7, 'EU', '2026-01-01')");
             }
 
@@ -32,6 +36,7 @@ public class RankingsDbTests
                 Assert.Equal(RankingsDb.SchemaVersion, Convert.ToInt32(db.Scalar("PRAGMA user_version")));
                 Assert.Equal(AllTables.Order(), Query(db, "SELECT name FROM sqlite_schema WHERE type = 'table' ORDER BY name"));
                 Assert.Equal(1L, db.Scalar("SELECT COUNT(*) FROM teams WHERE team_id = 7"));
+                Assert.Equal(1L, db.Scalar("SELECT COUNT(*) FROM pragma_table_info('team_display') WHERE name = 'logo_dark'"));
             }
         }
         finally
@@ -218,6 +223,23 @@ public class RankingsDbTests
         var shortNames = new RatingsStore(db).SiteTeams(new DateOnly(2026, 7, 1)).ToDictionary(team => team.TeamId, team => team.ShortName);
 
         Assert.Equal(("Team Without Short", "SZ"), (shortNames[1], shortNames[2]));
+    }
+
+    [Fact]
+    public void SiteTeams_CarryTheDarkThemeLogoWhenThereIsOne()
+    {
+        using var db = RankingsDb.Open(":memory:");
+        SeedTeamsAndPlayers(db);
+        db.Execute("""
+            INSERT INTO team_display (team_id, valid_from, name, logo, logo_dark) VALUES
+                (1, '2026-01-01', 'Both Themes', 'one.svg', NULL),
+                (2, '2026-01-01', 'Light And Dark', 'light.svg', 'dark.svg');
+            """);
+
+        var logos = new RatingsStore(db).SiteTeams(new DateOnly(2026, 7, 1)).ToDictionary(team => team.TeamId, team => (team.Logo, team.LogoDark));
+
+        Assert.Equal(("one.svg", (string?)null), logos[1]);
+        Assert.Equal(("light.svg", (string?)"dark.svg"), logos[2]);
     }
 
     [Theory]
