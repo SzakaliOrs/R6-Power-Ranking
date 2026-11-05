@@ -13,6 +13,12 @@ public sealed record SimulationOptions
 
     public int TeamsPerLeague { get; init; } = 10;
 
+    /// <summary>
+    /// A league that only starts in the latest season, as China did in 2026: its teams appear then
+    /// and it gets its international spots then. Null starts every league in the first season.
+    /// </summary>
+    public string? LateLeague { get; init; } = "CN";
+
     /// <summary>Spread (standard deviation) of the leagues' average strength.</summary>
     public double LeagueSpread { get; init; } = 60;
 

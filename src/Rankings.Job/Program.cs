@@ -11,10 +11,11 @@ const string Usage = """
       Rankings.Job backfill [--from YYYY-MM-DD] [--to YYYY-MM-DD] [options] [--b2] [--restart]
       Rankings.Job reparse  --from YYYY-MM-DD --to YYYY-MM-DD [options] [--b2]
       Rankings.Job backtest --synthetic [--seed N] [--seasons N]
+      Rankings.Job sample-site [--seed N] [--out web/public/data]
 
     Dates are whole UTC days, both included; nothing before 2023-01-01 is fetched.
     fetch and backfill call Liquipedia; reparse only reads the archive; backtest --synthetic
-    simulates its seasons and touches nothing.
+    simulates its seasons and touches nothing; sample-site writes the site's JSON from synthetic seasons.
 
     Options:
       --db <path>            rankings.db to update (default rankings.db)
@@ -41,6 +42,7 @@ try
         ["backfill", .. var rest] => await Backfill(Cli.Parse(rest)),
         ["reparse", .. var rest] => await Reparse(Cli.Parse(rest)),
         ["backtest", .. var rest] => RunBacktest(Cli.Parse(rest)),
+        ["sample-site", .. var rest] => WriteSampleSite(Cli.Parse(rest)),
         _ => Fail(Usage, 2),
     };
 }
@@ -122,6 +124,15 @@ int RunBacktest(Cli cli)
     if (options.Seasons < 3)
         throw new CliException("--seasons must be at least 3: warm-up, tuning and check.");
     Console.Write(SyntheticBacktest.Report(options));
+    return 0;
+}
+
+int WriteSampleSite(Cli cli)
+{
+    var output = cli.Value("out") ?? Path.Combine("web", "public", "data");
+    var input = Rankings.Job.Site.SampleSite.Build(new Rankings.Sim.SimulationOptions { Seed = cli.Number("seed", 1) });
+    Rankings.Job.Site.SiteExport.Write(input, output);
+    Console.WriteLine($"Wrote sample site data for {input.Days[^1].Teams.Count} teams to {output}.");
     return 0;
 }
 

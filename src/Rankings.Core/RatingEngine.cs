@@ -27,8 +27,8 @@ public sealed class RatingEngine(RatingSettings settings, IEnumerable<DateTimeOf
     {
         var skipped = new List<SkippedMap>();
         var events = new List<RosterEvent>();
+        var ratedMaps = new List<RatedMap>();
         var teamsThatPlayed = new HashSet<int>();
-        var ratedCount = 0;
 
         foreach (var series in BySeries(InPlayOrder(maps)))
         {
@@ -54,11 +54,12 @@ public sealed class RatingEngine(RatingSettings settings, IEnumerable<DateTimeOf
                     [map.TeamA] = state.Rating(map.TeamA),
                     [map.TeamB] = state.Rating(map.TeamB),
                 };
-                onPrediction?.Invoke(map, Elo.Expected(state.Rating(map.TeamA), state.Rating(map.TeamB)));
+                var (ratingA, ratingB) = (state.Rating(map.TeamA), state.Rating(map.TeamB));
+                onPrediction?.Invoke(map, Elo.Expected(ratingA, ratingB));
                 RateMap(state, map);
+                ratedMaps.Add(new RatedMap(map, state.Rating(map.TeamA) - ratingA, state.Rating(map.TeamB) - ratingB));
                 teamsThatPlayed.Add(map.TeamA);
                 teamsThatPlayed.Add(map.TeamB);
-                ratedCount++;
             }
             SeriesBonus(state, mapsWithWinner, ratingsBeforeSeries!);
         }
@@ -72,7 +73,7 @@ public sealed class RatingEngine(RatingSettings settings, IEnumerable<DateTimeOf
             foreach (var playerId in team.Lineup)
                 state.SetPlayer(playerId, new PlayerRating(team.TeamId, team.Offset));
 
-        return new RatingRun(ratedCount, skipped, events);
+        return new RatingRun(ratedMaps, skipped, events);
     }
 
     /// <summary>
@@ -361,9 +362,18 @@ public sealed class RatingEngine(RatingSettings settings, IEnumerable<DateTimeOf
     }
 }
 
-/// <param name="Rated">Maps that moved ratings.</param>
+/// <param name="RatedMaps">Maps that moved ratings, in play order, with what each did to both teams.</param>
 /// <param name="Events">Roster changes the run found, for the log and the admin.</param>
-public sealed record RatingRun(int Rated, IReadOnlyList<SkippedMap> Skipped, IReadOnlyList<RosterEvent> Events);
+public sealed record RatingRun(IReadOnlyList<RatedMap> RatedMaps, IReadOnlyList<SkippedMap> Skipped, IReadOnlyList<RosterEvent> Events)
+{
+    public int Rated => RatedMaps.Count;
+}
+
+/// <summary>
+/// One rated map and how it moved each team's rating (the map's own update, before the series
+/// bonus and re-centring), for the team view's recent results.
+/// </summary>
+public sealed record RatedMap(MapRecord Map, double RatingChangeA, double RatingChangeB);
 
 public sealed record SkippedMap(string MapId, string Reason);
 

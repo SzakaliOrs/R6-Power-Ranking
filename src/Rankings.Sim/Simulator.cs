@@ -4,9 +4,11 @@ namespace Rankings.Sim;
 
 /// <summary>
 /// Builds synthetic top-level seasons: 7 leagues of 10 teams, each league with two stages
-/// (a round robin, then playoffs), two majors and a world championship. Between seasons
-/// players change skill, rosters change, the last team in a league may be relegated and teams
-/// may disband. The same seed always gives the same world.
+/// (a round robin, then playoffs), two majors and a world championship. International spots
+/// follow the real split: EU, NA and SA 4 each and 4 shared by the APAC subregions through a
+/// qualifier, plus 4 for the late league (China) once it exists. Between seasons players change
+/// skill, rosters change, the last team in a league may be relegated and teams may disband.
+/// The same seed always gives the same world.
 /// </summary>
 public sealed class Simulator
 {
@@ -16,7 +18,11 @@ public sealed class Simulator
         ("ASIA", "Asia"), ("OCE", "Oceania"), ("APAC-N", "APAC North"),
     ];
 
+    static readonly string[] ApacSubregions = ["ASIA", "OCE", "APAC-N"];
+
     const int RosterSize = 5;
+
+    const int SpotsPerRegion = 4;
 
     readonly SimulationOptions _options;
     readonly Random _random;
@@ -63,6 +69,8 @@ public sealed class Simulator
         {
             _leagueStrength[leagueId] = Normal(0, _options.LeagueSpread);
             _freeAgents[leagueId] = [];
+            if (leagueId == _options.LateLeague)
+                continue;
             for (var slot = 0; slot < _options.TeamsPerLeague; slot++)
                 NewTeam(leagueId, Normal(0, _options.OrganisationSpread), veterans: RosterSize, skillMean: 0);
         }
@@ -72,6 +80,10 @@ public sealed class Simulator
             var year = _options.FirstYear + season;
             if (season > 0)
                 OffSeason(At(year - 1, 12, 1));
+            // The late league starts in the latest season: established players, new to the data.
+            if (season == _options.Seasons - 1 && _options.LateLeague is { } lateLeague)
+                for (var slot = 0; slot < _options.TeamsPerLeague; slot++)
+                    NewTeam(lateLeague, Normal(0, _options.OrganisationSpread), veterans: 0, skillMean: 0);
             PlaySeason(year);
         }
 
@@ -87,18 +99,18 @@ public sealed class Simulator
         var seasonMapWins = _teams.Where(team => team.Active).ToDictionary(team => team.Id, _ => 0);
 
         var stageOne = PlayStage(year, "Stage 1", At(year, 2, 1), At(year, 4, 12), seasonMapWins);
-        PlayInternational($"Major {year} - Spring", At(year, 5, 10), Qualified(stageOne));
+        PlayInternational($"Major {year} - Spring", At(year, 5, 10), stageOne);
 
         MidSeasonChanges();
         var stageTwo = PlayStage(year, "Stage 2", At(year, 6, 8), At(year, 8, 16), seasonMapWins);
-        PlayInternational($"Major {year} - Autumn", At(year, 9, 10), Qualified(stageTwo));
+        PlayInternational($"Major {year} - Autumn", At(year, 9, 10), stageTwo);
 
         var seasonStandings = Leagues.ToDictionary(league => league.Id, league => _teams
             .Where(team => team.Active && team.League == league.Id)
             .OrderByDescending(team => seasonMapWins.GetValueOrDefault(team.Id))
             .ThenBy(team => team.Id)
             .ToList());
-        PlayInternational($"World Championship {year}", At(year, 11, 10), Qualified(seasonStandings));
+        PlayInternational($"World Championship {year}", At(year, 11, 10), seasonStandings);
     }
 
     /// <summary>A round robin in every league, one round a week, then semi-finals and a final for the top four.</summary>
@@ -111,6 +123,8 @@ public sealed class Simulator
             var (leagueId, leagueName) = Leagues[leagueIndex];
             var tournament = $"{leagueName} League {year} - {stage}";
             var teams = _teams.Where(team => team.Active && team.League == leagueId).ToList();
+            if (teams.Count == 0)
+                continue;
             // Half the leagues play their round robin as BO1, the others as BO3.
             var roundRobinBestOf = leagueIndex % 2 == 0 ? 1 : 3;
             var mapWins = teams.ToDictionary(team => team.Id, _ => 0);
@@ -142,23 +156,45 @@ public sealed class Simulator
         return standings;
     }
 
-    /// <summary>Each league's top two, plus the third team of the two strongest leagues: 16 teams.</summary>
-    List<Team> Qualified(Dictionary<string, List<Team>> standings)
+    /// <summary>
+    /// The top four of EU, NA, SA and the late league once it exists, and four APAC teams: the
+    /// top four of a BO1 round robin between the top two of each APAC subregion a week before the
+    /// event, so a subregion can send two teams, one or none.
+    /// </summary>
+    List<Team> Qualified(Dictionary<string, List<Team>> standings, string tournament, DateTimeOffset eventStart)
     {
-        var strongest = _leagueStrength.OrderByDescending(league => league.Value).Take(2).Select(league => league.Key);
+        var apacCandidates = ApacSubregions.SelectMany(leagueId => standings[leagueId].Take(2)).ToList();
+        var mapWins = apacCandidates.ToDictionary(team => team.Id, _ => 0);
+        var qualifierDay = eventStart.AddDays(-7);
+        var pairing = 0;
+        for (var first = 0; first < apacCandidates.Count; first++)
+            for (var second = first + 1; second < apacCandidates.Count; second++)
+            {
+                var series = PlaySeries(apacCandidates[first], apacCandidates[second],
+                    qualifierDay.AddDays(pairing / 5).AddHours(10 + pairing % 5), 1, $"{tournament} - APAC Qualifier", "2");
+                Count(series, mapWins, null);
+                pairing++;
+            }
+
+        var directRegions = Leagues.Select(league => league.Id)
+            .Where(leagueId => !ApacSubregions.Contains(leagueId) && standings.ContainsKey(leagueId));
         return
         [
-            .. Leagues.SelectMany(league => standings[league.Id].Take(2)),
-            .. strongest.Select(leagueId => standings[leagueId][2]),
+            .. directRegions.SelectMany(leagueId => standings[leagueId].Take(SpotsPerRegion)),
+            .. apacCandidates.OrderByDescending(team => mapWins[team.Id]).ThenBy(team => team.Id).Take(SpotsPerRegion),
         ];
     }
 
-    /// <summary>Four groups of four playing BO1, then quarter-finals and semi-finals as BO3 and a BO5 final.</summary>
-    void PlayInternational(string tournament, DateTimeOffset start, List<Team> qualified)
+    /// <summary>
+    /// Groups of four playing BO1, then the eight best (every group winner, then the best
+    /// runners-up) in BO3 quarter-finals and semi-finals and a BO5 final.
+    /// </summary>
+    void PlayInternational(string tournament, DateTimeOffset start, Dictionary<string, List<Team>> standings)
     {
-        var drawn = qualified.OrderBy(_ => _random.Next()).ToList();
+        var drawn = Qualified(standings, tournament, start).OrderBy(_ => _random.Next()).ToList();
         var groupWinners = new List<(Team First, Team Second)>();
-        for (var group = 0; group < 4; group++)
+        var groupMapWins = new Dictionary<int, int>();
+        for (var group = 0; group < drawn.Count / 4; group++)
         {
             var members = drawn.Skip(4 * group).Take(4).ToList();
             var mapWins = members.ToDictionary(team => team.Id, _ => 0);
@@ -173,15 +209,22 @@ public sealed class Simulator
                 }
             var ranked = members.OrderByDescending(team => mapWins[team.Id]).ThenBy(team => team.Id).ToList();
             groupWinners.Add((ranked[0], ranked[1]));
+            foreach (var member in members)
+                groupMapWins[member.Id] = mapWins[member.Id];
         }
 
+        // Seeded 1 v 8, 4 v 5, 2 v 7, 3 v 6, so the top two seeds can only meet in the final.
+        var seeds = groupWinners.Select(pair => pair.First).OrderByDescending(team => groupMapWins[team.Id])
+            .Concat(groupWinners.Select(pair => pair.Second).OrderByDescending(team => groupMapWins[team.Id]))
+            .Take(8)
+            .ToList();
         var knockoutDay = start.AddDays(4);
         Team[] quarterFinalWinners =
         [
-            Winner(PlaySeries(groupWinners[0].First, groupWinners[1].Second, knockoutDay.AddHours(10), 3, tournament, "1")),
-            Winner(PlaySeries(groupWinners[1].First, groupWinners[0].Second, knockoutDay.AddHours(14), 3, tournament, "1")),
-            Winner(PlaySeries(groupWinners[2].First, groupWinners[3].Second, knockoutDay.AddHours(18), 3, tournament, "1")),
-            Winner(PlaySeries(groupWinners[3].First, groupWinners[2].Second, knockoutDay.AddHours(22), 3, tournament, "1")),
+            Winner(PlaySeries(seeds[0], seeds[7], knockoutDay.AddHours(10), 3, tournament, "1")),
+            Winner(PlaySeries(seeds[3], seeds[4], knockoutDay.AddHours(14), 3, tournament, "1")),
+            Winner(PlaySeries(seeds[1], seeds[6], knockoutDay.AddHours(18), 3, tournament, "1")),
+            Winner(PlaySeries(seeds[2], seeds[5], knockoutDay.AddHours(22), 3, tournament, "1")),
         ];
         var semiFinalDay = knockoutDay.AddDays(1);
         var finalistOne = Winner(PlaySeries(quarterFinalWinners[0], quarterFinalWinners[1], semiFinalDay.AddHours(12), 3, tournament, "1"));
@@ -232,6 +275,8 @@ public sealed class Simulator
         foreach (var (leagueId, _) in Leagues)
         {
             var active = _teams.Where(team => team.Active && team.League == leagueId).ToList();
+            if (active.Count == 0)
+                continue;
             var last = active.OrderBy(team => MapWins(lastSeasonMaps, team.Id)).ThenBy(team => team.Id).First();
             if (_random.NextDouble() < _options.RelegationChance)
             {

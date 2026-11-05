@@ -4,38 +4,28 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>R6 Power Ranking</title>
-  <style>
-    :root {
-      --bg: #ffffff;
-      --fg: #1a1a1a;
-      --muted: #666666;
-    }
-    @media (prefers-color-scheme: dark) {
-      :root {
-        --bg: #121212;
-        --fg: #f0f0f0;
-        --muted: #a0a0a0;
-      }
-    }
-    body {
-      margin: 0;
-      padding: 0 16px;
-      min-height: 100vh;
-      display: flex;
-      flex-direction: column;
-      align-items: center;
-      justify-content: center;
-      font-family: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
-      background: var(--bg);
-      color: var(--fg);
-      text-align: center;
-    }
-    h1 { margin-bottom: 0.25em; }
-    p { color: var(--muted); }
-  </style>
+  <meta name="description" content="Daily power rankings of top-level Rainbow Six Siege teams, rated map by map.">
+  <link rel="icon" href="logos/fallback.svg" type="image/svg+xml">
+  <link rel="stylesheet" href="styles.css">
 </head>
 <body>
-  <h1>R6 Power Ranking</h1>
-  <p>Coming soonTM.</p>
+  <header class="site-header">
+    <div class="wrap header-row">
+      <a class="brand" href="#/rankings">R6 Power Ranking</a>
+      <nav class="tabs" aria-label="Sections">
+        <a href="#/rankings" data-tab="rankings">Rankings</a>
+        <a href="#/regions" data-tab="regions">Regions</a>
+        <a href="#/movers" data-tab="movers">Movers</a>
+      </nav>
+    </div>
+  </header>
+  <main id="view" class="wrap" aria-live="polite">
+    <p class="muted">Loading…</p>
+  </main>
+  <footer class="wrap site-footer">
+    <p id="updated" class="muted"></p>
+    <p class="muted">Every top-level map counts, rated with a two-layer Elo: region rating plus the team's offset within it. Rankings change once a day.</p>
+  </footer>
+  <script src="app.js"></script>
 </body>
 </html>

@@ -10,11 +10,13 @@ public static class Replay
 {
     /// <param name="onPrediction">Called before each map with team A's win chance.</param>
     /// <param name="startingOffsets">Offsets for first-season teams instead of 0, e.g. from league standings.</param>
+    /// <param name="onDayRated">Called after each day's run, e.g. to take that day's snapshot.</param>
     public static RatingState Run(
         History history,
         RatingSettings settings,
         Action<MapRecord, double>? onPrediction = null,
-        IReadOnlyDictionary<int, double>? startingOffsets = null)
+        IReadOnlyDictionary<int, double>? startingOffsets = null,
+        Action<DateOnly, RatingState, RatingRun>? onDayRated = null)
     {
         var state = new RatingState();
         if (history.Maps.Count == 0)
@@ -58,7 +60,8 @@ public static class Replay
                 if (state.Teams.ContainsKey(freeze.TeamId))
                     RatingEngine.Freeze(state, freeze.TeamId);
             var endOfDay = new DateTimeOffset(day.AddDays(1).ToDateTime(TimeOnly.MinValue), TimeSpan.Zero);
-            engine.Rate(state, mapsByDay[day], endOfDay, onPrediction);
+            var run = engine.Rate(state, mapsByDay[day], endOfDay, onPrediction);
+            onDayRated?.Invoke(day, state, run);
         }
         return state;
     }

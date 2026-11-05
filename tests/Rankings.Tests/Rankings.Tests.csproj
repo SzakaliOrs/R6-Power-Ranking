@@ -27,6 +27,7 @@
     <ProjectReference Include="..\..\src\Rankings.Core\Rankings.Core.csproj" />
     <ProjectReference Include="..\..\src\Rankings.Sim\Rankings.Sim.csproj" />
     <ProjectReference Include="..\..\src\Rankings.Job\Rankings.Job.csproj" />
+    <ProjectReference Include="..\..\src\Rankings.Admin\Rankings.Admin.csproj" />
   </ItemGroup>
 
 </Project>

@@ -1,5 +1,6 @@
 <Solution>
   <Folder Name="/src/">
+    <Project Path="src/Rankings.Admin/Rankings.Admin.csproj" />
     <Project Path="src/Rankings.Core/Rankings.Core.csproj" />
     <Project Path="src/Rankings.Job/Rankings.Job.csproj" />
     <Project Path="src/Rankings.Sim/Rankings.Sim.csproj" />

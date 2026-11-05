@@ -486,3 +486,9 @@ rankings.db
 rankings.db-*
 lpdb-calls.json
 /archive/
+
+# Site data is generated: by `sample-site` locally, by the daily job for the real site
+/web/public/data/
+
+# The admin dashboard's record of what it last pulled from R2
+*.r2.json

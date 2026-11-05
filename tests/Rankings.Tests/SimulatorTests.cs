@@ -108,10 +108,32 @@ public sealed class SimulatorTests : IDisposable
             .ToList();
 
         Assert.Equal(["APAC-N", "ASIA", "CN", "EU", "NA", "OCE", "SA"], history.TeamLeagues.Values.Distinct().Order());
-        Assert.Equal(70, firstSeasonTeams.Count);
+        // China's league only starts in the latest season.
+        Assert.Equal(60, firstSeasonTeams.Count);
         Assert.Equal(70, World.Value.TrueStrengths.Count);
         Assert.Contains(history.Maps, map => history.TeamLeagues[map.TeamA] != history.TeamLeagues[map.TeamB]);
         Assert.Equal(4, history.SeasonStarts.Count);
+    }
+
+    [Fact]
+    public void Run_InternationalSpotsFollowTheRealSplit()
+    {
+        var world = World.Value;
+        var leagues = world.History.TeamLeagues;
+        var latestSeason = world.History.SeasonStarts[^1];
+
+        foreach (var tournament in world.Series.Where(series => series.Tier == "1").GroupBy(series => series.Tournament))
+        {
+            var teams = tournament.SelectMany(series => new[] { series.TeamA.TeamId, series.TeamB.TeamId }).Distinct().ToList();
+            var chinaJoined = tournament.First().PlayedAt >= latestSeason;
+            Assert.Equal(chinaJoined ? 20 : 16, teams.Count);
+            foreach (var region in (string[])["EU", "NA", "SA"])
+                Assert.Equal(4, teams.Count(teamId => leagues[teamId] == region));
+            Assert.Equal(chinaJoined ? 4 : 0, teams.Count(teamId => leagues[teamId] == "CN"));
+            Assert.Equal(4, teams.Count(teamId => leagues[teamId] is "ASIA" or "OCE" or "APAC-N"));
+        }
+        Assert.DoesNotContain(world.History.Maps, map => map.PlayedAt < latestSeason
+            && (leagues[map.TeamA] == "CN" || leagues[map.TeamB] == "CN"));
     }
 
     [Fact]
