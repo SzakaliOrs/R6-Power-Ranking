@@ -1,0 +1,177 @@
+{
+    "result": [
+        {
+            "pageid": 75081,
+            "pagename": "Asia_Pacific_League/2026/Stage_1/APAC_North",
+            "objectname": "75081_XtD9IqfaeJ_R01-M001",
+            "match2id": "XtD9IqfaeJ_R01-M001",
+            "match2bracketid": "XtD9IqfaeJ",
+            "status": "",
+            "winner": "1",
+            "walkover": "",
+            "resulttype": "",
+            "finished": 1,
+            "mode": "team",
+            "type": "Online",
+            "section": "Playoffs",
+            "game": "siegex",
+            "date": "2026-07-08 09:00:00",
+            "dateexact": 1,
+            "bestof": 3,
+            "tournament": "Asia Pacific League 2026 - North - Stage 1",
+            "parent": "Asia_Pacific_League/2026/Stage_1/APAC_North",
+            "series": "Asia Pacific League",
+            "liquipediatier": "2",
+            "liquipediatiertype": "General",
+            "extradata": { "timezoneoffset": "+09:00", "timestamp": 1783501200, "timezoneid": "JST" },
+            "match2opponents": [
+                {
+                    "id": 1, "type": "team", "name": "CAG by VARREL", "template": "cag by varrel orig",
+                    "score": 2, "status": "S", "placement": 1,
+                    "match2players": [
+                        { "id": 1, "opid": 1, "name": "Zaka", "displayname": "Zaka", "flag": "Japan", "extradata": [] },
+                        { "id": 2, "opid": 1, "name": "ShuReap", "displayname": "ShuReap", "flag": "Japan", "extradata": [] },
+                        { "id": 3, "opid": 1, "name": "DD", "displayname": "DD", "flag": "Japan", "extradata": [] },
+                        { "id": 4, "opid": 1, "name": "Chibisu", "displayname": "Chibisu", "flag": "Japan", "extradata": [] },
+                        { "id": 5, "opid": 1, "name": "Anitun", "displayname": "Anitun", "flag": "Japan", "extradata": [] }
+                    ],
+                    "extradata": [],
+                    "teamtemplate": { "template": "cag by varrel orig", "name": "CAG by VARREL", "shortname": "CAG" }
+                },
+                {
+                    "id": 2, "type": "team", "name": "SCARZ", "template": "scarz 2022",
+                    "score": 1, "status": "S", "placement": 2,
+                    "match2players": [
+                        { "id": 1, "opid": 2, "name": "YuKiz", "displayname": "YuKiz", "flag": "Japan", "extradata": [] },
+                        { "id": 2, "opid": 2, "name": "Wqsyo1", "displayname": "Wqsyo1", "flag": "Japan", "extradata": [] },
+                        { "id": 3, "opid": 2, "name": "Rec", "displayname": "Rec", "flag": "Japan", "extradata": [] },
+                        { "id": 4, "opid": 2, "name": "Pyon", "displayname": "Pyon", "flag": "Japan", "extradata": [] },
+                        { "id": 5, "opid": 2, "name": "Nina", "displayname": "Nina", "flag": "Japan", "extradata": [] },
+                        { "id": 6, "opid": 2, "name": "FishLike", "displayname": "FishLike", "flag": "Japan", "extradata": [] }
+                    ],
+                    "extradata": [],
+                    "teamtemplate": { "template": "scarz 2022", "name": "SCARZ", "shortname": "SZ" }
+                }
+            ],
+            "match2games": [
+                {
+                    "map": "Fortress", "subgroup": "1", "match2gameid": 1, "scores": [7, 8],
+                    "participants": [],
+                    "opponents": [{ "status": "S", "score": 7 }, { "status": "S", "score": 8 }],
+                    "status": "", "winner": "2", "walkover": "", "resulttype": "",
+                    "date": "2026-07-08 09:00:00",
+                    "extradata": {
+                        "dateexact": true, "timestamp": 1783501200,
+                        "t1halfs": { "otdef": "0", "otatk": "1", "atk": "3", "def": "3" },
+                        "t2halfs": { "otdef": "1", "otatk": "1", "atk": "3", "def": "3" }
+                    }
+                },
+                {
+                    "map": "Lair", "subgroup": "2", "match2gameid": 2, "scores": [8, 6],
+                    "participants": [],
+                    "opponents": [{ "status": "S", "score": 8 }, { "status": "S", "score": 6 }],
+                    "status": "", "winner": "1", "walkover": "", "resulttype": "",
+                    "date": "2026-07-08 09:00:00",
+                    "extradata": {
+                        "dateexact": true, "timestamp": 1783501200,
+                        "t1halfs": { "otdef": "1", "otatk": "1", "atk": "2", "def": "4" },
+                        "t2halfs": { "otdef": "0", "otatk": "0", "atk": "2", "def": "4" }
+                    }
+                },
+                {
+                    "map": "Bank", "subgroup": "3", "match2gameid": 3, "scores": [7, 3],
+                    "participants": [],
+                    "opponents": [{ "status": "S", "score": 7 }, { "status": "S", "score": 3 }],
+                    "status": "", "winner": "1", "walkover": "", "resulttype": "",
+                    "date": "2026-07-08 09:00:00",
+                    "extradata": {
+                        "dateexact": true, "timestamp": 1783501200,
+                        "t1halfs": { "atk": "6", "def": "1" },
+                        "t2halfs": { "atk": "3", "def": "0" }
+                    }
+                }
+            ],
+            "wiki": "rainbowsix"
+        },
+        {
+            "pageid": 75081,
+            "pagename": "Asia_Pacific_League/2026/Stage_1/APAC_North",
+            "objectname": "75081_XtD9IqfaeJ_R01-M002",
+            "match2id": "XtD9IqfaeJ_R01-M002",
+            "match2bracketid": "XtD9IqfaeJ",
+            "status": "",
+            "winner": "1",
+            "walkover": "",
+            "resulttype": "",
+            "finished": 1,
+            "mode": "team",
+            "type": "Online",
+            "section": "Playoffs",
+            "game": "siegex",
+            "date": "2026-07-08 13:00:00",
+            "dateexact": 1,
+            "bestof": 3,
+            "tournament": "Asia Pacific League 2026 - North - Stage 1",
+            "parent": "Asia_Pacific_League/2026/Stage_1/APAC_North",
+            "series": "Asia Pacific League",
+            "liquipediatier": "2",
+            "liquipediatiertype": "General",
+            "extradata": { "timezoneoffset": "+09:00", "timestamp": 1783515600, "timezoneid": "JST" },
+            "match2opponents": [
+                {
+                    "id": 1, "type": "team", "name": "Dplus", "template": "dplus orig",
+                    "score": 2, "status": "S", "placement": 1,
+                    "match2players": [
+                        { "id": 1, "opid": 1, "name": "NearZ", "displayname": "NearZ", "flag": "Brazil", "extradata": [] },
+                        { "id": 2, "opid": 1, "name": "Muzi", "displayname": "Muzi", "flag": "Brazil", "extradata": [] },
+                        { "id": 3, "opid": 1, "name": "Mity", "displayname": "Mity", "flag": "Brazil", "extradata": [] },
+                        { "id": 4, "opid": 1, "name": "Levy", "displayname": "Levy", "flag": "Brazil", "extradata": [] },
+                        { "id": 5, "opid": 1, "name": "Faallz", "displayname": "Faallz", "flag": "Brazil", "extradata": [] }
+                    ],
+                    "extradata": [],
+                    "teamtemplate": { "template": "dplus orig", "name": "Dplus", "shortname": "DK" }
+                },
+                {
+                    "id": 2, "type": "team", "name": "KINOTROPE gaming", "template": "kinotrope gaming",
+                    "score": 1, "status": "S", "placement": 2,
+                    "match2players": [
+                        { "id": 1, "opid": 2, "name": "Kawa", "displayname": "Kawa", "flag": "Japan", "extradata": [] },
+                        { "id": 2, "opid": 2, "name": "Gatorada", "displayname": "gatorada", "flag": "Japan", "extradata": [] },
+                        { "id": 3, "opid": 2, "name": "Eclair", "displayname": "Eclair", "flag": "Japan", "extradata": [] },
+                        { "id": 4, "opid": 2, "name": "Ayagator", "displayname": "Ayagator", "flag": "Japan", "extradata": [] },
+                        { "id": 5, "opid": 2, "name": "Aokayu", "displayname": "Aokayu", "flag": "Japan", "extradata": [] }
+                    ],
+                    "extradata": [],
+                    "teamtemplate": { "template": "kinotrope gaming", "name": "KINOTROPE gaming", "shortname": "KNT" }
+                }
+            ],
+            "match2games": [
+                {
+                    "map": "Fortress", "subgroup": "1", "match2gameid": 1, "scores": [7, 0],
+                    "participants": [],
+                    "opponents": [{ "status": "S", "score": 7 }, { "status": "S", "score": 0 }],
+                    "status": "", "winner": "1", "walkover": "", "resulttype": "",
+                    "date": "2026-07-08 13:00:00",
+                    "extradata": { "dateexact": true, "timestamp": 1783515600 }
+                },
+                {
+                    "map": "Clubhouse", "subgroup": "2", "match2gameid": 2, "scores": [7, 8],
+                    "participants": [],
+                    "opponents": [{ "status": "S", "score": 7 }, { "status": "S", "score": 8 }],
+                    "status": "", "winner": "2", "walkover": "", "resulttype": "",
+                    "date": "2026-07-08 13:00:00",
+                    "extradata": { "dateexact": true, "timestamp": 1783515600 }
+                },
+                {
+                    "map": "Lair", "subgroup": "3", "match2gameid": 3, "scores": [7, 3],
+                    "participants": [],
+                    "opponents": [{ "status": "S", "score": 7 }, { "status": "S", "score": 3 }],
+                    "status": "", "winner": "1", "walkover": "", "resulttype": "",
+                    "date": "2026-07-08 13:00:00",
+                    "extradata": { "dateexact": true, "timestamp": 1783515600 }
+                }
+            ],
+            "wiki": "rainbowsix"
+        }
+    ]
+}
