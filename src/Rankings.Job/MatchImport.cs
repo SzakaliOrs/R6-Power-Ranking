@@ -73,9 +73,11 @@ public sealed class MatchImport(RankingsDb db, IReadOnlyList<IArchiveStore> arch
     /// finished one, and records progress after each month so a stopped run carries on from there.
     /// Stops before a month when <paramref name="remainingCalls"/> says the hourly budget is spent.
     /// </summary>
+    /// <param name="onMonthDone">Called after each month is archived and stored, with its first and last day.</param>
     public async Task<ImportSummary> BackfillAsync(
         IMatchSource source, Func<int> remainingCalls, DateOnly from, DateOnly to,
-        bool restart = false, CancellationToken cancellationToken = default)
+        bool restart = false, Action<DateOnly, DateOnly, ImportSummary>? onMonthDone = null,
+        CancellationToken cancellationToken = default)
     {
         var start = from;
         if (!restart && db.GetState(BackfillStateKey) is { } done
@@ -101,6 +103,7 @@ public sealed class MatchImport(RankingsDb db, IReadOnlyList<IArchiveStore> arch
                 return total with { StoppedForBudget = true };
             }
             db.SetState(BackfillStateKey, end.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture));
+            onMonthDone?.Invoke(month, end, summary);
             total = new ImportSummary(total.Days + summary.Days, total.Maps + summary.Maps,
                 total.Skipped + summary.Skipped, summary.UnassignedTeams);
         }
@@ -111,6 +114,7 @@ public sealed class MatchImport(RankingsDb db, IReadOnlyList<IArchiveStore> arch
     {
         var ids = new ProviderIds(db);
         var resolved = ids.Resolve(maps);
+        db.SaveSeries(maps);
         db.SaveMaps(resolved.Maps);
         // A map stored now may have been skipped before, e.g. while its team was unassigned.
         db.ClearSkipped(resolved.Maps.SelectMany(m => new[] { m.MapId, m.SeriesId }));

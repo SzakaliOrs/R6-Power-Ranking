@@ -35,6 +35,9 @@ public sealed class RatingState
     /// <summary>Maps before this instant use the warm-up K multiplier; set for the first replayed season.</summary>
     public DateTimeOffset? WarmUpUntil { get; set; }
 
+    /// <summary>When the first rated day's first map was played; null until then. Set by <see cref="DailyRating"/>.</summary>
+    public DateTimeOffset? FirstMapAt { get; set; }
+
     public void AddLeague(string leagueId, double rating) => _leagues.Add(leagueId, rating);
 
     public void SetLeagueEntryLevel(string leagueId, double level) => _leagueEntryLevels[leagueId] = level;

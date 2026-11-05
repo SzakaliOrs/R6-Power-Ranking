@@ -64,9 +64,19 @@ api.MapPost("/teams/{teamId:int}/display", (int teamId, TeamDisplay request) =>
     store.SetDisplay(teamId, request.ValidFrom, request.Name, request.ShortName, request.Logo);
     return Results.NoContent();
 });
+api.MapPost("/teams/{teamId:int}/league", (int teamId, TeamLeague request) =>
+    new { fullRecalculationNeeded = store.SetLeague(teamId, request.League) });
+api.MapPost("/teams/{teamId:int}/merge", (int teamId, TeamMerge request) =>
+    new { fullRecalculationNeeded = store.MergeTeams(teamId, request.IntoTeamId) });
 api.MapPost("/teams/{teamId:int}/status", (int teamId, TeamStatus request) =>
 {
     store.SetStatus(teamId, request.Status, request.EffectiveOn, request.Note);
+    return Results.NoContent();
+});
+api.MapPost("/teams/status", (TeamStatuses request) =>
+{
+    store.SetStatuses(request.TeamIds, request.Status, string.IsNullOrEmpty(request.EffectiveOn) ? null : request.EffectiveOn,
+        request.Note, request.AfterLastMap);
     return Results.NoContent();
 });
 api.MapPost("/provider-teams/link", (ProviderLink request) =>
@@ -102,6 +112,7 @@ api.MapPost("/regions/{regionId}/entry-level", (string regionId, EntryLevel requ
 });
 
 api.MapGet("/skipped-maps", () => store.SkippedMaps());
+api.MapGet("/rankings", (string? date) => store.Rankings(string.IsNullOrEmpty(date) ? null : date));
 
 api.MapPost("/sync/pull", async (PullRequest request, CancellationToken cancellationToken) =>
 {
@@ -127,6 +138,9 @@ string? ArgumentAfter(string name)
 record NewTeam(string League, string Name, string? ShortName, string CreatedOn, string? ProviderKey);
 record TeamDisplay(string ValidFrom, string Name, string? ShortName, string? Logo);
 record TeamStatus(string Status, string EffectiveOn, string? Note);
+record TeamStatuses(int[] TeamIds, string Status, string? EffectiveOn, string? Note, bool AfterLastMap = false);
+record TeamLeague(string League);
+record TeamMerge(int IntoTeamId);
 record ProviderLink(string ProviderKey, int TargetId);
 record EntryLevel(double? Level);
 record PullRequest(bool Overwrite);

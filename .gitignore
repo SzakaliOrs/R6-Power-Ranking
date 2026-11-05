@@ -486,6 +486,7 @@ rankings.db
 rankings.db-*
 lpdb-calls.json
 /archive/
+/logs/
 
 # Site data is generated: by `sample-site` locally, by the daily job for the real site
 /web/public/data/

@@ -10,7 +10,8 @@ namespace Rankings.Job.Storage;
 /// </summary>
 public sealed class RankingsDb : IDisposable
 {
-    public const int SchemaVersion = 1;
+    /// <summary>schema.sql is version 1; each file in migrations/ named NNN-*.sql takes it to version NNN.</summary>
+    public const int SchemaVersion = 2;
 
     public SqliteConnection Connection { get; }
 
@@ -43,25 +44,42 @@ public sealed class RankingsDb : IDisposable
         return db;
     }
 
+    /// <summary>
+    /// Creates an empty file at version 1 and brings any older file up to date, one migration at
+    /// a time, so a rankings.db pulled from R2 keeps its data.
+    /// </summary>
     void EnsureSchema()
     {
         var version = Convert.ToInt32(Scalar("PRAGMA user_version"));
         if (version == SchemaVersion)
             return;
-        if (version != 0)
+        if (version > SchemaVersion)
             throw new InvalidOperationException(
-                $"Database schema version is {version}, this build expects {SchemaVersion}.");
+                $"Database schema version is {version}, this build only knows up to {SchemaVersion}.");
 
         using var tx = Connection.BeginTransaction();
-        Execute(ReadSchema(), tx);
+        if (version == 0)
+        {
+            Execute(ReadResource("schema.sql"), tx);
+            version = 1;
+        }
+        for (var next = version + 1; next <= SchemaVersion; next++)
+            Execute(ReadResource(MigrationResource(next)), tx);
         Execute($"PRAGMA user_version = {SchemaVersion}", tx);
         tx.Commit();
     }
 
-    static string ReadSchema()
+    static string MigrationResource(int version)
     {
-        using var stream = typeof(RankingsDb).Assembly.GetManifestResourceStream("schema.sql")
-            ?? throw new InvalidOperationException("schema.sql is not embedded in the assembly.");
+        var prefix = $"migrations/{version:D3}-";
+        return typeof(RankingsDb).Assembly.GetManifestResourceNames().SingleOrDefault(name => name.StartsWith(prefix, StringComparison.Ordinal))
+            ?? throw new InvalidOperationException($"No migration to schema version {version} is embedded.");
+    }
+
+    static string ReadResource(string name)
+    {
+        using var stream = typeof(RankingsDb).Assembly.GetManifestResourceStream(name)
+            ?? throw new InvalidOperationException($"{name} is not embedded in the assembly.");
         using var reader = new StreamReader(stream);
         return reader.ReadToEnd();
     }
@@ -139,6 +157,29 @@ public sealed class RankingsDb : IDisposable
             }
         }
 
+        tx.Commit();
+    }
+
+    /// <summary>Records each series' tournament and tier, for the team views once its maps are rated.</summary>
+    public void SaveSeries(IEnumerable<SourceMap> maps)
+    {
+        using var tx = Connection.BeginTransaction();
+        using var cmd = Connection.CreateCommand();
+        cmd.Transaction = tx;
+        cmd.CommandText = """
+            INSERT INTO series (series_id, tournament, tier) VALUES ($series_id, $tournament, $tier)
+            ON CONFLICT (series_id) DO UPDATE SET tournament = excluded.tournament, tier = excluded.tier
+            """;
+        var seriesId = cmd.Parameters.Add("$series_id", SqliteType.Text);
+        var tournament = cmd.Parameters.Add("$tournament", SqliteType.Text);
+        var tier = cmd.Parameters.Add("$tier", SqliteType.Text);
+        foreach (var map in maps.DistinctBy(map => map.SeriesId))
+        {
+            seriesId.Value = map.SeriesId;
+            tournament.Value = map.Tournament;
+            tier.Value = map.Tier;
+            cmd.ExecuteNonQuery();
+        }
         tx.Commit();
     }
 

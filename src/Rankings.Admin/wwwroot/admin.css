@@ -67,3 +67,5 @@ input[type="number"] { width: 90px; }
 button { cursor: pointer; background: var(--surface); }
 button.primary { background: var(--accent); color: #fff; border-color: var(--accent); }
 details summary { cursor: pointer; color: var(--accent); }
+th button.sort { border: 0; padding: 0; background: none; color: inherit; font: inherit; text-transform: inherit; letter-spacing: inherit; }
+th button.sort:hover, th button.sort.active { color: var(--fg); }

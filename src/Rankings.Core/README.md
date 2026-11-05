@@ -26,8 +26,10 @@ Before a team plays a map, the engine also handles its roster, its history and t
 - **Roster changes.** A lineup must keep `RosterCoreSize` (3) players from the last one to stay the
   same team. Each new player pulls the offset toward zero, and K is boosted for the next few maps.
   Fewer than 3 kept means the team is reseeded under the same ID.
-- **Freezing.** A relegated or disbanded team keeps its rating and is not ranked. It comes back if
-  it plays again.
+- **Freezing.** A relegated or disbanded team keeps its rating and is not ranked. Its rating moves
+  again if it plays, but `Snapshots.Take` leaves it unranked while the admin's status says
+  relegated or disbanded. `DailyRating.RateDay` also freezes the teams it is given as dropped after
+  that day's maps and re-centres their leagues without them.
 - **Season starts** pull every offset part-way toward zero.
 - **Inactivity decay** starts after 90 days without a map.
 - **Provisional flag:** a team is provisional until it has 10 rated maps.
@@ -45,7 +47,8 @@ Before a team plays a map, the engine also handles its roster, its history and t
 | `RatingState` | Everything carried between runs: league ratings, team offsets, players' last offsets |
 | `RatingEngine` | One run: rates maps series by series, then applies seasons, decay and re-centring |
 | `Elo` | The formulas: expectation, margin multiplier, series win chance, update |
-| `Replay` | Rates a whole `History` one UTC day at a time, exactly as the daily job would |
+| `DailyRating` | Rates one UTC day at a time and keeps all it needs in the `RatingState`, so the daily job can stop after any day and carry on next run with identical results |
+| `Replay` | Rates a whole `History` one UTC day at a time, for the backtest and the sample site; it knows every team in advance |
 | `Snapshots` | A day's ranked team rows and league rows |
 | `Backtest` | Log-loss scoring, a simple settings search, and rank correlation against known strengths |
 

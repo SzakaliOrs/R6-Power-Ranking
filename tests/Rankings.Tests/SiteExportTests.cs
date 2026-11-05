@@ -41,6 +41,39 @@ public sealed class SiteExportTests : IDisposable
     }
 
     [Fact]
+    public void Snapshot_LeavesTeamsMarkedRelegatedOrDisbandedUnrankedEvenWhenRated()
+    {
+        var state = new RatingState();
+        state.AddLeague("EU", 1500);
+        state.AddTeam(1, "EU", 20);
+        state.AddTeam(2, "EU", 60);
+        state.AddTeam(3, "EU", -20);
+
+        var snapshot = Snapshots.Take(state, new DateOnly(2026, 3, 1), new RatingSettings(), previous: null, unrankedTeams: new HashSet<int> { 2 });
+
+        Assert.Equal([(1, (int?)1), (3, 2), (2, null)], snapshot.Teams.Select(team => (team.TeamId, team.Rank)));
+        Assert.Equal(1560, snapshot.Teams.Single(team => team.TeamId == 2).Rating);
+    }
+
+    [Fact]
+    public void UnrankedTeams_FollowTheLatestStatusInEffectOnTheDay()
+    {
+        var unranked = new Rankings.Job.Storage.UnrankedTeams([
+            new(TeamId: 1, Day: new DateOnly(2026, 3, 1), Unranked: true),
+            new(TeamId: 1, Day: new DateOnly(2026, 6, 1), Unranked: false),
+            new(TeamId: 2, Day: new DateOnly(2026, 4, 1), Unranked: true),
+            new(TeamId: 2, Day: new DateOnly(2026, 4, 1), Unranked: false),
+            new(TeamId: 3, Day: new DateOnly(2026, 5, 1), Unranked: false),
+            new(TeamId: 3, Day: new DateOnly(2026, 2, 1), Unranked: true),
+        ]);
+
+        Assert.Empty(unranked.On(new DateOnly(2026, 1, 31)));
+        Assert.Equal([1, 3], unranked.On(new DateOnly(2026, 3, 1)).Order());
+        Assert.Equal([1], unranked.On(new DateOnly(2026, 5, 1)).Order());
+        Assert.Empty(unranked.On(new DateOnly(2026, 6, 1)));
+    }
+
+    [Fact]
     public void Snapshot_ChangeIsSinceThePreviousSnapshot()
     {
         var state = new RatingState();

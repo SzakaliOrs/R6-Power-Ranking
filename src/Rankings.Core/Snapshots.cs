@@ -6,12 +6,19 @@ namespace Rankings.Core;
 /// </summary>
 public static class Snapshots
 {
-    public static DaySnapshot Take(RatingState state, DateOnly date, RatingSettings settings, DaySnapshot? previous)
+    /// <param name="unrankedTeams">
+    /// Teams the admin marked relegated or disbanded as of <paramref name="date"/>: they keep a row
+    /// and their rating, but no rank, even after playing again (which unfreezes their rating).
+    /// </param>
+    public static DaySnapshot Take(RatingState state, DateOnly date, RatingSettings settings, DaySnapshot? previous,
+        IReadOnlySet<int>? unrankedTeams = null)
     {
         var previousTeams = previous?.Teams.ToDictionary(team => team.TeamId, team => team.Rating) ?? [];
         var previousLeagues = previous?.Leagues.ToDictionary(league => league.LeagueId, league => league.Rating) ?? [];
 
-        var ranks = Replay.Ranking(state).Select((teamId, index) => (teamId, rank: index + 1))
+        var ranks = Replay.Ranking(state)
+            .Where(teamId => unrankedTeams is null || !unrankedTeams.Contains(teamId))
+            .Select((teamId, index) => (teamId, rank: index + 1))
             .ToDictionary(pair => pair.teamId, pair => pair.rank);
         var teams = state.Teams.Values
             .Where(team => team.Seeded)

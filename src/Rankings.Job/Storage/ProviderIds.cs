@@ -13,6 +13,9 @@ public sealed record UnassignedTeam(string ProviderKey, string Name, string? Las
 /// </summary>
 public sealed class ProviderIds(RankingsDb db)
 {
+    /// <summary>Starts the skip reason of a map whose team is unassigned; the keys follow, comma-separated.</summary>
+    public const string UnassignedReason = "team not assigned yet: ";
+
     /// <summary>
     /// Resolves each map's teams and players. Maps with a team not yet assigned are skipped,
     /// and every team key seen is recorded so the admin endpoint can list it.
@@ -31,8 +34,7 @@ public sealed class ProviderIds(RankingsDb db)
             {
                 var keys = new[] { (map.TeamA.Key, teamA), (map.TeamB.Key, teamB) }
                     .Where(t => t.Item2 is null).Select(t => t.Key);
-                skipped.Add(new(map.MapId, map.SeriesId, map.PlayedAt,
-                    $"team not assigned yet: {string.Join(", ", keys)}"));
+                skipped.Add(new(map.MapId, map.SeriesId, map.PlayedAt, UnassignedReason + string.Join(", ", keys)));
                 continue;
             }
             if (teamA == teamB)

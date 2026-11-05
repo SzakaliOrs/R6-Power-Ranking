@@ -40,6 +40,18 @@ public sealed class LocalArchiveStore(string root) : IArchiveStore
     string PathFor(string key) => Path.Combine(root, key.Replace('/', Path.DirectorySeparatorChar));
 }
 
+/// <summary>Another store with every key under a prefix, e.g. <c>synthetic/</c>, so synthetic days never mix with real ones.</summary>
+public sealed class PrefixedArchiveStore(IArchiveStore inner, string prefix) : IArchiveStore
+{
+    public string Name => $"{inner.Name} ({prefix})";
+
+    public Task WriteAsync(string key, byte[] content, CancellationToken cancellationToken = default) =>
+        inner.WriteAsync(prefix + key, content, cancellationToken);
+
+    public Task<byte[]?> ReadAsync(string key, CancellationToken cancellationToken = default) =>
+        inner.ReadAsync(prefix + key, cancellationToken);
+}
+
 /// <summary>An S3-compatible bucket: Backblaze B2 for the archive.</summary>
 public sealed class S3ArchiveStore(IAmazonS3 s3, string bucket) : IArchiveStore
 {

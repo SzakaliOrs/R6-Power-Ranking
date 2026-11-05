@@ -79,6 +79,105 @@ public sealed class AdminTests : IDisposable
     }
 
     [Fact]
+    public void SetLeague_FixesAWrongAssignmentBeforeTheTeamIsRated()
+    {
+        var store = StoreWithUnassignedTeams();
+        var teamId = store.CreateTeam("EU", "SCARZ", null, "2026-01-01", "scarz 2022");
+
+        var fullRecalculationNeeded = store.SetLeague(teamId, "APAC-N");
+
+        Assert.False(fullRecalculationNeeded);
+        Assert.Equal("APAC-N", Assert.Single(store.Teams()).League);
+    }
+
+    [Fact]
+    public void SetLeague_RefusesTheApacGroupAndUnknownLeagues()
+    {
+        var store = StoreWithUnassignedTeams();
+        var teamId = store.CreateTeam("EU", "SCARZ", null, "2026-01-01", null);
+
+        Assert.Throws<AdminException>(() => store.SetLeague(teamId, "APAC"));
+        Assert.Throws<AdminException>(() => store.SetLeague(teamId, "MARS"));
+        Assert.Throws<AdminException>(() => store.SetLeague(999, "EU"));
+        Assert.Equal("EU", Assert.Single(store.Teams()).League);
+    }
+
+    [Fact]
+    public void SetLeague_OnARatedTeam_SaysAFullRecalculationIsNeeded()
+    {
+        var store = StoreWithUnassignedTeams();
+        var teamId = store.CreateTeam("EU", "SCARZ", null, "2026-01-01", null);
+        using (var db = RankingsDb.Open(_path))
+            db.Execute($"INSERT INTO team_ratings (team_id, rating_offset) VALUES ({teamId}, 12.5)");
+
+        Assert.True(store.SetLeague(teamId, "APAC-N"));
+    }
+
+    [Fact]
+    public void MergeTeams_MovesKeysAndMapsAndDeletesTheDuplicate()
+    {
+        var store = StoreWithUnassignedTeams();
+        var kept = store.CreateTeam("APAC-N", "SCARZ", "SZ", "2026-01-01", "scarz 2022");
+        var duplicate = store.CreateTeam("ASIA", "SCARZ (old)", null, "2026-01-01", "dplus orig");
+        var opponent = store.CreateTeam("APAC-N", "Opponent", null, "2026-01-01", null);
+        using (var db = RankingsDb.Open(_path))
+            db.Execute($"""
+                INSERT INTO maps (map_id, series_id, played_at, map_number, maps_in_series, team_a, team_b, rounds_a, rounds_b)
+                VALUES ('s/1', 's', 1783501200, 1, 1, {duplicate}, {opponent}, 7, 3)
+                """);
+
+        var fullRecalculationNeeded = store.MergeTeams(duplicate, kept);
+
+        Assert.False(fullRecalculationNeeded);
+        var teams = store.Teams();
+        Assert.Equal([kept, opponent], teams.Select(team => team.TeamId).Order());
+        var keptTeam = teams.Single(team => team.TeamId == kept);
+        Assert.Equal(("APAC-N", "SCARZ"), (keptTeam.League, keptTeam.Name));
+        Assert.Equal(["dplus orig", "scarz 2022"], keptTeam.ProviderKeys);
+        using var check = RankingsDb.Open(_path);
+        Assert.Equal((long)kept, check.Scalar("SELECT team_a FROM maps WHERE map_id = 's/1'"));
+    }
+
+    [Fact]
+    public void MergeTeams_RefusesTeamsThatPlayedEachOther()
+    {
+        var store = StoreWithUnassignedTeams();
+        var first = store.CreateTeam("EU", "First", null, "2026-01-01", null);
+        var second = store.CreateTeam("EU", "Second", null, "2026-01-01", null);
+        using (var db = RankingsDb.Open(_path))
+            db.Execute($"""
+                INSERT INTO maps (map_id, series_id, played_at, map_number, maps_in_series, team_a, team_b, rounds_a, rounds_b)
+                VALUES ('s/1', 's', 1783501200, 1, 1, {first}, {second}, 7, 3)
+                """);
+
+        var error = Assert.Throws<AdminException>(() => store.MergeTeams(first, second));
+        Assert.Contains("played each other", error.Message);
+        Assert.Throws<AdminException>(() => store.MergeTeams(first, first));
+        Assert.Throws<AdminException>(() => store.MergeTeams(first, 999));
+        Assert.Equal(2, store.Teams().Count);
+    }
+
+    [Fact]
+    public void MergeTeams_OfARatedTeam_SaysAFullRecalculationIsNeeded()
+    {
+        var store = StoreWithUnassignedTeams();
+        var kept = store.CreateTeam("EU", "Kept", null, "2026-01-01", null);
+        var duplicate = store.CreateTeam("EU", "Duplicate", null, "2026-01-01", null);
+        using (var db = RankingsDb.Open(_path))
+        {
+            db.Execute($"INSERT INTO team_ratings (team_id, rating_offset) VALUES ({duplicate}, 12.5)");
+            db.Execute($"""
+                INSERT INTO team_snapshots (date, team_id, rank, rating, rating_offset, region_rating, change, maps_played, algorithm_version)
+                VALUES ('2026-03-01', {duplicate}, 1, 1512.5, 12.5, 1500, 0, 3, 'elo-1')
+                """);
+        }
+
+        Assert.True(store.MergeTeams(duplicate, kept));
+        using var check = RankingsDb.Open(_path);
+        Assert.Equal(0L, check.Scalar($"SELECT COUNT(*) FROM team_snapshots WHERE team_id = {duplicate}"));
+    }
+
+    [Fact]
     public void SetDisplay_ANewNameAppliesFromItsDate()
     {
         var store = StoreWithUnassignedTeams();
@@ -103,6 +202,109 @@ public sealed class AdminTests : IDisposable
         using var db = RankingsDb.Open(_path);
         Assert.Equal("""{"status":"disbanded"}""", db.Scalar("SELECT payload FROM overrides WHERE kind = 'status'"));
         Assert.Throws<AdminException>(() => store.SetStatus(teamId, "retired", "2026-06-01", null));
+    }
+
+    [Fact]
+    public void Rankings_ShowsTheChosenDayWithNamesInUseAndTheWeekChange()
+    {
+        var store = StoreWithUnassignedTeams();
+        Assert.Null(store.Rankings(null).Date);
+        var leader = store.CreateTeam("EU", "Old Name", null, "2025-01-01", null);
+        var unranked = store.CreateTeam("NA", "Unranked", null, "2025-01-01", null);
+        store.SetDisplay(leader, "2026-03-05", "New Name", null, null);
+        using (var db = RankingsDb.Open(_path))
+        {
+            using var insert = db.Connection.CreateCommand();
+            insert.CommandText = """
+                INSERT INTO team_snapshots (date, team_id, rank, rating, rating_offset, region_rating, change, maps_played, algorithm_version) VALUES
+                    ('2026-03-01', $leader, 1, 1550, 50, 1500, 0, 12, 'elo-1'),
+                    ('2026-03-08', $leader, 1, 1562.5, 60, 1502.5, 2, 15, 'elo-1'),
+                    ('2026-03-08', $unranked, NULL, 1480, -20, 1500, 0, 4, 'elo-1');
+                INSERT INTO region_snapshots (date, region_id, rating, algorithm_version) VALUES
+                    ('2026-03-01', 'EU', 1500, 'elo-1'), ('2026-03-08', 'EU', 1502.5, 'elo-1');
+                """;
+            insert.Parameters.AddWithValue("$leader", leader);
+            insert.Parameters.AddWithValue("$unranked", unranked);
+            insert.ExecuteNonQuery();
+        }
+
+        var latest = store.Rankings(null);
+        Assert.Equal(("2026-03-08", "2026-03-01", "2026-03-08"), (latest.Date, latest.FirstDate, latest.LastDate));
+        Assert.Equal([leader, unranked], latest.Teams.Select(team => team.TeamId));
+        var leaderRow = latest.Teams[0];
+        Assert.Equal(("New Name", 12.5, false), (leaderRow.Name, leaderRow.WeekChange, leaderRow.Provisional));
+        Assert.True(latest.Teams[1].Provisional);
+        Assert.Null(latest.Teams[1].Rank);
+        Assert.Equal(2.5, Assert.Single(latest.Leagues).WeekChange);
+
+        var earlier = store.Rankings("2026-03-04");
+        Assert.Equal("2026-03-01", earlier.Date);
+        Assert.Equal("Old Name", Assert.Single(earlier.Teams).Name);
+
+        // A team created after the days it was rated still shows its first name on them.
+        var lateTeam = store.CreateTeam("EU", "Created Late", null, "2026-11-05", null);
+        using (var db = RankingsDb.Open(_path))
+        {
+            using var insert = db.Connection.CreateCommand();
+            insert.CommandText = """
+                INSERT INTO team_snapshots (date, team_id, rank, rating, rating_offset, region_rating, change, maps_played, algorithm_version)
+                VALUES ('2026-03-08', $team, 2, 1500, 0, 1500, 0, 3, 'elo-1')
+                """;
+            insert.Parameters.AddWithValue("$team", lateTeam);
+            insert.ExecuteNonQuery();
+        }
+        Assert.Equal("Created Late", store.Rankings(null).Teams.Single(team => team.TeamId == lateTeam).Name);
+    }
+
+    [Fact]
+    public void SetStatuses_ChangesEverySelectedTeamOrNoneOfThem()
+    {
+        var store = StoreWithUnassignedTeams();
+        var first = store.CreateTeam("EU", "First", null, "2025-01-01", null);
+        var second = store.CreateTeam("NA", "Second", null, "2025-01-01", null);
+        var untouched = store.CreateTeam("EU", "Untouched", null, "2025-01-01", null);
+
+        store.SetStatuses([first, second], "relegated", "2026-06-01", "end of stage");
+
+        var statuses = store.Teams().ToDictionary(team => team.TeamId, team => team.Status);
+        Assert.Equal(("relegated", "relegated", "active"), (statuses[first], statuses[second], statuses[untouched]));
+        using (var db = RankingsDb.Open(_path))
+            Assert.Equal(2L, db.Scalar("SELECT COUNT(*) FROM overrides WHERE kind = 'status' AND effective_on = '2026-06-01'"));
+
+        Assert.Throws<AdminException>(() => store.SetStatuses([untouched, 9999], "disbanded", "2026-07-01", null));
+        Assert.Equal("active", store.Teams().Single(team => team.TeamId == untouched).Status);
+        Assert.Throws<AdminException>(() => store.SetStatuses([], "disbanded", "2026-07-01", null));
+    }
+
+    [Fact]
+    public void SetStatuses_AfterLastMapStartsTheDayAfterEachTeamsLastMap()
+    {
+        var store = StoreWithUnassignedTeams();
+        var played = store.CreateTeam("EU", "Played", null, "2025-01-01", null);
+        var opponent = store.CreateTeam("EU", "Opponent", null, "2025-01-01", null);
+        var neverPlayed = store.CreateTeam("EU", "Never Played", null, "2025-03-01", null);
+        using (var db = RankingsDb.Open(_path))
+        {
+            using var insert = db.Connection.CreateCommand();
+            // 2026-02-10 and 2026-04-20, both around midday UTC.
+            insert.CommandText = """
+                INSERT INTO rated_maps (map_id, series_id, played_at, map_number, maps_in_series, team_a, team_b, rounds_a, rounds_b, change_a, change_b)
+                VALUES ('early/1', 'early', 1770724800, 1, 1, $played, $opponent, 7, 3, 5, -5),
+                       ('late/1', 'late', 1776686400, 1, 1, $opponent, $played, 7, 5, 4, -4)
+                """;
+            insert.Parameters.AddWithValue("$played", played);
+            insert.Parameters.AddWithValue("$opponent", opponent);
+            insert.ExecuteNonQuery();
+        }
+
+        store.SetStatuses([played, neverPlayed], "disbanded", null, null, afterLastMap: true);
+
+        using (var db = RankingsDb.Open(_path))
+        {
+            Assert.Equal("2026-04-21", db.Scalar($"SELECT effective_on FROM overrides WHERE team_id = {played}"));
+            Assert.Equal("2025-03-01", db.Scalar($"SELECT effective_on FROM overrides WHERE team_id = {neverPlayed}"));
+        }
+        Assert.Throws<AdminException>(() => store.SetStatuses([played], "active", null, null, afterLastMap: true));
     }
 
     [Fact]
