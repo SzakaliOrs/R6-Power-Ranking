@@ -204,6 +204,22 @@ public class RankingsDbTests
         Assert.Equal(expected, db.Scalar(query));
     }
 
+    [Fact]
+    public void SiteTeams_UseTheFullNameWhenNoShortNameIsGiven()
+    {
+        using var db = RankingsDb.Open(":memory:");
+        SeedTeamsAndPlayers(db);
+        db.Execute("""
+            INSERT INTO team_display (team_id, valid_from, name, short_name) VALUES
+                (1, '2026-01-01', 'Team Without Short', NULL),
+                (2, '2026-01-01', 'SCARZ', 'SZ');
+            """);
+
+        var shortNames = new RatingsStore(db).SiteTeams(new DateOnly(2026, 7, 1)).ToDictionary(team => team.TeamId, team => team.ShortName);
+
+        Assert.Equal(("Team Without Short", "SZ"), (shortNames[1], shortNames[2]));
+    }
+
     [Theory]
     [InlineData("INSERT INTO teams (team_id, region_id, created_on) VALUES (9, 'NOPE', '2026-01-01')")]
     [InlineData("INSERT INTO teams (team_id, region_id, status, created_on) VALUES (9, 'EU', 'retired', '2026-01-01')")]

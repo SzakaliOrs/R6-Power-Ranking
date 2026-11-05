@@ -18,6 +18,11 @@ public sealed class HourlyCallLimiter(
 
     readonly Queue<DateTimeOffset> _calls = new((earlierCalls ?? []).Order());
 
+    public int MaxCalls => maxCalls;
+
+    /// <summary>Called with the time the next call fits, before the limiter waits for it.</summary>
+    public Action<DateTimeOffset>? Waiting { get; set; }
+
     /// <summary>Calls made in the last hour, oldest first.</summary>
     public IReadOnlyList<DateTimeOffset> RecentCalls
     {
@@ -47,6 +52,7 @@ public sealed class HourlyCallLimiter(
             var wait = _calls.Peek() + Window - now;
             if (wait > maxWait)
                 throw new LpdbBudgetSpentException(now + wait);
+            Waiting?.Invoke(now + wait);
             await Task.Delay(wait, time, cancellationToken);
         }
     }

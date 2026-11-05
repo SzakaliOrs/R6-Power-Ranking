@@ -225,7 +225,10 @@ public sealed class RatingsStore(RankingsDb db)
             reader => new RosterEvent(DateTimeOffset.FromUnixTimeSeconds(reader.GetInt64(0)), reader.GetInt32(1),
                 Enum.Parse<RosterEventKind>(reader.GetString(2)), reader.GetInt32(3), reader.IsDBNull(4) ? null : reader.GetInt32(4)));
 
-    /// <summary>Every team with the name and logo in use on <paramref name="day"/>.</summary>
+    /// <summary>
+    /// Every team with the name and logo in use on <paramref name="day"/>. A team without a short
+    /// name uses its full name as the short one.
+    /// </summary>
     public List<SiteTeam> SiteTeams(DateOnly day) =>
         Rows("""
             SELECT t.team_id, t.region_id, d.name, d.short_name, d.logo
@@ -234,8 +237,12 @@ public sealed class RatingsStore(RankingsDb db)
                 SELECT MAX(valid_from) FROM team_display WHERE team_id = t.team_id AND valid_from <= $day)
             ORDER BY t.team_id
             """,
-            reader => new SiteTeam(reader.GetInt32(0), reader.IsDBNull(2) ? $"Team {reader.GetInt32(0)}" : reader.GetString(2),
-                reader.IsDBNull(3) ? null : reader.GetString(3), reader.IsDBNull(4) ? null : reader.GetString(4), reader.GetString(1)),
+            reader =>
+            {
+                var name = reader.IsDBNull(2) ? $"Team {reader.GetInt32(0)}" : reader.GetString(2);
+                var shortName = reader.IsDBNull(3) || string.IsNullOrWhiteSpace(reader.GetString(3)) ? name : reader.GetString(3);
+                return new SiteTeam(reader.GetInt32(0), name, shortName, reader.IsDBNull(4) ? null : reader.GetString(4), reader.GetString(1));
+            },
             ("$day", Text(day)));
 
     public List<SiteRegion> SiteRegions() =>

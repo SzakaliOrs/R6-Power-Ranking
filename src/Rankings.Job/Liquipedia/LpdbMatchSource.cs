@@ -29,6 +29,9 @@ public sealed class LpdbMatchSource : IMatchSource
         _time = time ?? TimeProvider.System;
     }
 
+    /// <summary>Called after each call with a line for the log: the call's place in the hourly budget and what it fetched.</summary>
+    public Action<string>? Log { get; set; }
+
     /// <summary>An HttpClient that accepts gzip, which Liquipedia requires.</summary>
     public static HttpClient CreateHttpClient() =>
         new(new SocketsHttpHandler { AutomaticDecompression = DecompressionMethods.GZip });
@@ -54,8 +57,12 @@ public sealed class LpdbMatchSource : IMatchSource
             message.Headers.TryAddWithoutValidation("User-Agent", _options.UserAgent);
             using var response = await _http.SendAsync(message, cancellationToken);
             var body = await response.Content.ReadAsStringAsync(cancellationToken);
+            var callsThisHour = _limiter.RecentCalls.Count;
+            var page = $"{from:yyyy-MM-dd}..{to.AddSeconds(-1):yyyy-MM-dd}, page {offset / _options.PageSize + 1}";
             if (response.StatusCode == HttpStatusCode.TooManyRequests)
             {
+                Log?.Invoke($"Call {callsThisHour}/{_limiter.MaxCalls} this hour ({page}): Liquipedia answered 429, rate limited. "
+                    + "Stopping without retrying; the hour now counts as full.");
                 _limiter.MarkExhausted();
                 throw new LpdbRateLimitedException(request, response.Headers.RetryAfter?.Delta);
             }
@@ -71,6 +78,8 @@ public sealed class LpdbMatchSource : IMatchSource
                 throw new InvalidOperationException($"LPDB reported an error for {request}: {Shorten(error.GetRawText())}");
 
             var result = root.GetProperty("result");
+            Log?.Invoke($"Call {callsThisHour}/{_limiter.MaxCalls} this hour, {_limiter.MaxCalls - callsThisHour} left ({page}): "
+                + $"{result.GetArrayLength()} series.");
             foreach (var match in result.EnumerateArray())
                 LpdbMatchParser.Parse(match, maps, skipped);
             if (result.GetArrayLength() < _options.PageSize)

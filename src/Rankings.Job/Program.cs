@@ -138,6 +138,9 @@ async Task<int> RunDaily(Cli cli)
     return 0;
 }
 
+void Log(string message) =>
+    Console.WriteLine($"{DateTimeOffset.UtcNow:yyyy-MM-dd HH:mm:ss} UTC  {message}");
+
 void Warn(string message) =>
     Console.WriteLine(Environment.GetEnvironmentVariable("GITHUB_ACTIONS") == "true" ? $"::warning::{message}" : $"Warning: {message}");
 
@@ -155,6 +158,7 @@ async Task<int> Fetch(Cli cli)
     var (from, to) = (cli.Date("from"), cli.Date("to"));
     CheckRange(from, to);
     using var db = RankingsDb.Open(cli.Value("db") ?? "rankings.db");
+    new RatingsStore(db).CheckDataSource("liquipedia");
     var (source, limiter) = Liquipedia(cli);
 
     var summary = await new MatchImport(db, Archives(cli)).FetchAsync(source, from, to);
@@ -168,10 +172,15 @@ async Task<int> Backfill(Cli cli)
     var to = cli.Date("to", DateOnly.FromDateTime(DateTime.UtcNow).AddDays(-1));
     CheckRange(from, to);
     using var db = RankingsDb.Open(cli.Value("db") ?? "rankings.db");
+    new RatingsStore(db).CheckDataSource("liquipedia");
     var (source, limiter) = Liquipedia(cli);
+    Log($"Backfilling {from:yyyy-MM-dd} to {to:yyyy-MM-dd} into {cli.Value("db") ?? "rankings.db"}"
+        + (db.GetState(MatchImport.BackfillStateKey) is { } done && !cli.Flag("restart") ? $", carrying on after {done}." : "."));
 
     var summary = await new MatchImport(db, Archives(cli))
-        .BackfillAsync(source, () => limiter.Remaining, from, to, cli.Flag("restart"));
+        .BackfillAsync(source, () => limiter.Remaining, from, to, cli.Flag("restart"), (monthStart, monthEnd, month) => Log(
+            $"Done {monthStart:yyyy-MM-dd}..{monthEnd:yyyy-MM-dd}: {month.Maps} map(s) stored, {month.Skipped} skipped, "
+            + $"{month.UnassignedTeams} team(s) waiting for an assignment."));
     Report("Backfilled", summary, limiter);
     var through = db.GetState(MatchImport.BackfillStateKey);
     Console.WriteLine(summary.StoppedForBudget
@@ -235,7 +244,12 @@ void CheckRange(DateOnly from, DateOnly to)
     };
     var limiter = new CallLogFile(cli.Value("call-log") ?? "lpdb-calls.json")
         .CreateLimiter(options.MaxCallsPerHour, TimeProvider.System, cli.Flag("wait") ? null : TimeSpan.Zero);
-    return (new LpdbMatchSource(LpdbMatchSource.CreateHttpClient(), options, limiter), limiter);
+    limiter.Waiting = nextCallAt => Log(
+        $"Hourly limit reached: {limiter.MaxCalls}/{limiter.MaxCalls} calls used in the last hour. "
+        + $"Waiting until {nextCallAt:HH:mm:ss} UTC ({Math.Ceiling((nextCallAt - DateTimeOffset.UtcNow).TotalMinutes)} min).");
+    var source = new LpdbMatchSource(LpdbMatchSource.CreateHttpClient(), options, limiter) { Log = Log };
+    Log($"Liquipedia calls already used in the last hour: {limiter.RecentCalls.Count}/{limiter.MaxCalls}.");
+    return (source, limiter);
 }
 
 List<IArchiveStore> Archives(Cli cli)
