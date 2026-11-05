@@ -65,7 +65,12 @@ A few other behaviours:
   with real ones in B2. A synthetic run on an empty database starts from the whole simulated
   history.
 - **Freezes come from the admin's status changes.** A relegated or disbanded status freezes the
-  team from its effective date, in daily runs and full recalculations alike.
+  team from its effective date, in daily runs and full recalculations alike. The team also stays
+  unranked while that status is in effect, even if it plays again (its rating still moves); marking
+  it active ranks it again. Statuses are usually set after the fact, so a team whose status is now
+  relegated or disbanded is also frozen at the end of the day of its last map, whatever date was
+  entered: it leaves the rankings, movers and its league's average from then on, keeps its rating,
+  and its maps still count for the teams it played.
 
 ## Environment
 

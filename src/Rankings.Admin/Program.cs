@@ -75,7 +75,8 @@ api.MapPost("/teams/{teamId:int}/status", (int teamId, TeamStatus request) =>
 });
 api.MapPost("/teams/status", (TeamStatuses request) =>
 {
-    store.SetStatuses(request.TeamIds, request.Status, request.EffectiveOn, request.Note);
+    store.SetStatuses(request.TeamIds, request.Status, string.IsNullOrEmpty(request.EffectiveOn) ? null : request.EffectiveOn,
+        request.Note, request.AfterLastMap);
     return Results.NoContent();
 });
 api.MapPost("/provider-teams/link", (ProviderLink request) =>
@@ -137,7 +138,7 @@ string? ArgumentAfter(string name)
 record NewTeam(string League, string Name, string? ShortName, string CreatedOn, string? ProviderKey);
 record TeamDisplay(string ValidFrom, string Name, string? ShortName, string? Logo);
 record TeamStatus(string Status, string EffectiveOn, string? Note);
-record TeamStatuses(int[] TeamIds, string Status, string EffectiveOn, string? Note);
+record TeamStatuses(int[] TeamIds, string Status, string? EffectiveOn, string? Note, bool AfterLastMap = false);
 record TeamLeague(string League);
 record TeamMerge(int IntoTeamId);
 record ProviderLink(string ProviderKey, int TargetId);

@@ -7,6 +7,25 @@ using Rankings.Job.Site;
 namespace Rankings.Job.Storage;
 
 /// <summary>A run refused before it changed anything, e.g. a database built from another data source.</summary>
+/// <summary>An admin status change: from <paramref name="Day"/> on, the team is unranked (relegated or disbanded) or not (active).</summary>
+public sealed record StatusChange(int TeamId, DateOnly Day, bool Unranked);
+
+/// <summary>
+/// Which teams are relegated or disbanded on a given day: the status in effect is the team's
+/// latest change on or before that day, and of two changes on the same day the later entered wins.
+/// </summary>
+public sealed class UnrankedTeams(IReadOnlyList<StatusChange> changesInEntryOrder)
+{
+    public IReadOnlySet<int> On(DateOnly day) =>
+        changesInEntryOrder
+            .Where(change => change.Day <= day)
+            .GroupBy(change => change.TeamId)
+            // OrderBy is stable, so changes on the same day stay in the order they were entered.
+            .Where(changes => changes.OrderBy(change => change.Day).Last().Unranked)
+            .Select(changes => changes.Key)
+            .ToHashSet();
+}
+
 public sealed class DailyRunException(string message) : Exception(message);
 
 /// <summary>
@@ -85,6 +104,30 @@ public sealed class RatingsStore(RankingsDb db)
         using var payload = JsonDocument.Parse(statusPayload);
         return payload.RootElement.TryGetProperty("status", out var status) && status.GetString() is "relegated" or "disbanded";
     }
+
+    /// <summary>
+    /// Teams whose status is now relegated or disbanded, by the day of their last stored map: they
+    /// drop out after that day, however late the admin marked them. A relegated team that plays on
+    /// moves its day forward, so the daily runs can then differ slightly from a full recalculation
+    /// (they froze it in between); the next full recalculation evens that out.
+    /// </summary>
+    public ILookup<DateOnly, int> DroppedTeams() =>
+        Rows("""
+            SELECT t.team_id, MAX(played.played_at)
+            FROM teams t
+            JOIN (SELECT team_a AS team_id, played_at FROM maps UNION ALL SELECT team_b, played_at FROM maps
+                  UNION ALL SELECT team_a, played_at FROM rated_maps UNION ALL SELECT team_b, played_at FROM rated_maps) played
+              ON played.team_id = t.team_id
+            WHERE t.status IN ('relegated', 'disbanded')
+            GROUP BY t.team_id
+            """,
+            reader => (TeamId: reader.GetInt32(0), LastMapAt: reader.GetInt64(1)))
+        .ToLookup(row => DayOf(DateTimeOffset.FromUnixTimeSeconds(row.LastMapAt)), row => row.TeamId);
+
+    /// <summary>Every status change the admin made, for working out which teams are unranked on a day.</summary>
+    public UnrankedTeams UnrankedTeams() =>
+        new([.. Rows("SELECT team_id, effective_on, payload FROM overrides WHERE kind = 'status' AND team_id IS NOT NULL ORDER BY override_id",
+                reader => new StatusChange(reader.GetInt32(0), ParseDay(reader.GetString(1)), FreezesTeam(reader.GetString(2))))]);
 
     /// <summary>
     /// Days with maps skipped only because a team was unassigned, where every such team is

@@ -240,6 +240,20 @@ public sealed class AdminTests : IDisposable
         var earlier = store.Rankings("2026-03-04");
         Assert.Equal("2026-03-01", earlier.Date);
         Assert.Equal("Old Name", Assert.Single(earlier.Teams).Name);
+
+        // A team created after the days it was rated still shows its first name on them.
+        var lateTeam = store.CreateTeam("EU", "Created Late", null, "2026-11-05", null);
+        using (var db = RankingsDb.Open(_path))
+        {
+            using var insert = db.Connection.CreateCommand();
+            insert.CommandText = """
+                INSERT INTO team_snapshots (date, team_id, rank, rating, rating_offset, region_rating, change, maps_played, algorithm_version)
+                VALUES ('2026-03-08', $team, 2, 1500, 0, 1500, 0, 3, 'elo-1')
+                """;
+            insert.Parameters.AddWithValue("$team", lateTeam);
+            insert.ExecuteNonQuery();
+        }
+        Assert.Equal("Created Late", store.Rankings(null).Teams.Single(team => team.TeamId == lateTeam).Name);
     }
 
     [Fact]
@@ -260,6 +274,37 @@ public sealed class AdminTests : IDisposable
         Assert.Throws<AdminException>(() => store.SetStatuses([untouched, 9999], "disbanded", "2026-07-01", null));
         Assert.Equal("active", store.Teams().Single(team => team.TeamId == untouched).Status);
         Assert.Throws<AdminException>(() => store.SetStatuses([], "disbanded", "2026-07-01", null));
+    }
+
+    [Fact]
+    public void SetStatuses_AfterLastMapStartsTheDayAfterEachTeamsLastMap()
+    {
+        var store = StoreWithUnassignedTeams();
+        var played = store.CreateTeam("EU", "Played", null, "2025-01-01", null);
+        var opponent = store.CreateTeam("EU", "Opponent", null, "2025-01-01", null);
+        var neverPlayed = store.CreateTeam("EU", "Never Played", null, "2025-03-01", null);
+        using (var db = RankingsDb.Open(_path))
+        {
+            using var insert = db.Connection.CreateCommand();
+            // 2026-02-10 and 2026-04-20, both around midday UTC.
+            insert.CommandText = """
+                INSERT INTO rated_maps (map_id, series_id, played_at, map_number, maps_in_series, team_a, team_b, rounds_a, rounds_b, change_a, change_b)
+                VALUES ('early/1', 'early', 1770724800, 1, 1, $played, $opponent, 7, 3, 5, -5),
+                       ('late/1', 'late', 1776686400, 1, 1, $opponent, $played, 7, 5, 4, -4)
+                """;
+            insert.Parameters.AddWithValue("$played", played);
+            insert.Parameters.AddWithValue("$opponent", opponent);
+            insert.ExecuteNonQuery();
+        }
+
+        store.SetStatuses([played, neverPlayed], "disbanded", null, null, afterLastMap: true);
+
+        using (var db = RankingsDb.Open(_path))
+        {
+            Assert.Equal("2026-04-21", db.Scalar($"SELECT effective_on FROM overrides WHERE team_id = {played}"));
+            Assert.Equal("2025-03-01", db.Scalar($"SELECT effective_on FROM overrides WHERE team_id = {neverPlayed}"));
+        }
+        Assert.Throws<AdminException>(() => store.SetStatuses([played], "active", null, null, afterLastMap: true));
     }
 
     [Fact]

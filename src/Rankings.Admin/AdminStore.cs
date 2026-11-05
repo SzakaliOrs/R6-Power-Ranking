@@ -98,8 +98,10 @@ public sealed class AdminStore(string databasePath)
                    s.rating, s.rating_offset, s.region_rating, s.rating - w.rating, s.maps_played
             FROM team_snapshots s
             JOIN teams t ON t.team_id = s.team_id
-            LEFT JOIN team_display d ON d.team_id = s.team_id AND d.valid_from = (
-                SELECT MAX(valid_from) FROM team_display WHERE team_id = s.team_id AND valid_from <= s.date)
+            -- The name in use that day; before a team's first name starts, that first name.
+            LEFT JOIN team_display d ON d.team_id = s.team_id AND d.valid_from = COALESCE(
+                (SELECT MAX(valid_from) FROM team_display WHERE team_id = s.team_id AND valid_from <= s.date),
+                (SELECT MIN(valid_from) FROM team_display WHERE team_id = s.team_id))
             LEFT JOIN team_snapshots w ON w.team_id = s.team_id AND w.date = date(s.date, '-7 days')
             WHERE s.date = $date
             ORDER BY s.rank IS NULL, s.rank, s.rating DESC
@@ -264,26 +266,40 @@ public sealed class AdminStore(string databasePath)
         SetStatuses([teamId], status, effectiveOn, note);
 
     /// <summary>
-    /// Gives several teams the same status from the same date, all or none: an unknown team
-    /// leaves every team as it was.
+    /// Gives several teams the same status, all or none: an unknown team leaves every team as it
+    /// was. With <paramref name="afterLastMap"/>, each team's status starts the day after its last
+    /// map (a team that never played: <paramref name="effectiveOn"/>, else the day it was created),
+    /// so a disbanded team leaves the rankings when it stopped, without changing any rating.
     /// </summary>
-    public void SetStatuses(IReadOnlyCollection<int> teamIds, string status, string effectiveOn, string? note)
+    public void SetStatuses(IReadOnlyCollection<int> teamIds, string status, string? effectiveOn, string? note, bool afterLastMap = false)
     {
-        RequireDate(effectiveOn, "The date");
         if (status is not ("active" or "relegated" or "disbanded"))
             throw new AdminException($"'{status}' is not a status; use active, relegated or disbanded.");
+        if (afterLastMap && status == "active")
+            throw new AdminException("Pick the date a team becomes active again; 'after its last map' is for relegated or disbanded.");
+        if (!afterLastMap || effectiveOn is not null)
+            RequireDate(effectiveOn ?? "", "The date");
         if (teamIds.Count == 0)
             throw new AdminException("Select at least one team.");
         using var db = Open();
         var distinctTeamIds = teamIds.Distinct().ToList();
         foreach (var teamId in distinctTeamIds)
             RequireTeam(db, teamId);
+        var effectiveDates = distinctTeamIds.ToDictionary(teamId => teamId, teamId => afterLastMap
+            ? Scalar(db, null, """
+                SELECT date(MAX(played_at), 'unixepoch', '+1 day') FROM (
+                    SELECT played_at FROM rated_maps WHERE team_a = $team OR team_b = $team
+                    UNION ALL SELECT played_at FROM maps WHERE team_a = $team OR team_b = $team)
+                """, ("$team", teamId)) as string
+                ?? effectiveOn
+                ?? (string)Scalar(db, null, "SELECT created_on FROM teams WHERE team_id = $team", ("$team", teamId))!
+            : effectiveOn!);
         using var tx = db.Connection.BeginTransaction();
         foreach (var teamId in distinctTeamIds)
         {
             Execute(db, tx, "UPDATE teams SET status = $status WHERE team_id = $team", ("$status", status), ("$team", teamId));
             Execute(db, tx, "INSERT INTO overrides (kind, team_id, effective_on, payload, note) VALUES ($kind, $team, $on, $payload, $note)",
-                ("$kind", StatusOverride), ("$team", teamId), ("$on", effectiveOn),
+                ("$kind", StatusOverride), ("$team", teamId), ("$on", effectiveDates[teamId]),
                 ("$payload", JsonSerializer.Serialize(new { status })), ("$note", Blank(note)));
         }
         tx.Commit();

@@ -23,6 +23,11 @@ public sealed class DailyRating(RatingSettings settings, IReadOnlyList<DateTimeO
     /// <param name="teamLeagues">The league of every team that may play.</param>
     /// <param name="entryLevels">Admin entry levels for leagues that enter later.</param>
     /// <param name="frozenTeams">Teams relegated or disbanded on this day; frozen before its maps.</param>
+    /// <param name="droppedTeams">
+    /// Teams now marked relegated or disbanded whose last map is on this day: frozen after its maps,
+    /// so they leave the ranking and their league's average from this day on, keep their rating,
+    /// and their maps still count for the teams they played.
+    /// </param>
     public RatingRun RateDay(
         RatingState state,
         DateOnly day,
@@ -30,7 +35,8 @@ public sealed class DailyRating(RatingSettings settings, IReadOnlyList<DateTimeO
         IEnumerable<string> leagues,
         IReadOnlyDictionary<int, string> teamLeagues,
         IReadOnlyDictionary<string, double> entryLevels,
-        IEnumerable<int> frozenTeams)
+        IEnumerable<int> frozenTeams,
+        IEnumerable<int>? droppedTeams = null)
     {
         if (maps.FirstOrDefault(map => DayOf(map.PlayedAt) != day) is { } stray)
             throw new ArgumentException($"Map {stray.MapId} was not played on {day:yyyy-MM-dd}.", nameof(maps));
@@ -68,7 +74,19 @@ public sealed class DailyRating(RatingSettings settings, IReadOnlyList<DateTimeO
         }
 
         var endOfDay = new DateTimeOffset(day.AddDays(1).ToDateTime(TimeOnly.MinValue), TimeSpan.Zero);
-        return _engine.Rate(state, maps, endOfDay);
+        var run = _engine.Rate(state, maps, endOfDay);
+
+        var anyDropped = false;
+        foreach (var teamId in droppedTeams ?? [])
+            if (state.Teams.TryGetValue(teamId, out var team) && team.Seeded && !team.IsFrozen)
+            {
+                RatingEngine.Freeze(state, teamId);
+                anyDropped = true;
+            }
+        // Their leagues' ratings become the average of the teams still rated; no rating changes.
+        if (anyDropped)
+            RatingEngine.Recentre(state);
+        return run;
     }
 
     /// <summary>

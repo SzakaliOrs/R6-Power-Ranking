@@ -117,6 +117,8 @@ public sealed class DailyRun(
         var teamLeagues = store.TeamLeagues();
         var entryLevels = db.LoadLeagueEntryLevels();
         var freezes = store.Freezes();
+        var unrankedTeams = store.UnrankedTeams();
+        var droppedTeams = store.DroppedTeams();
 
         var ratedMaps = 0;
         using (var tx = db.Connection.BeginTransaction())
@@ -124,8 +126,8 @@ public sealed class DailyRun(
             store.ClearFrom(ratedFrom, tx);
             for (var day = ratedFrom; day <= yesterday; day = day.AddDays(1))
             {
-                var run = rater.RateDay(state, day, [.. mapsByDay[day]], leagues, teamLeagues, entryLevels, freezes[day]);
-                var snapshot = Snapshots.Take(state, day, settings, previous);
+                var run = rater.RateDay(state, day, [.. mapsByDay[day]], leagues, teamLeagues, entryLevels, freezes[day], droppedTeams[day]);
+                var snapshot = Snapshots.Take(state, day, settings, previous, unrankedTeams.On(day));
                 store.SaveDay(snapshot, run, AlgorithmVersion, tx);
                 previous = snapshot;
                 ratedMaps += run.Rated;

@@ -169,12 +169,17 @@ async function showAssign() {
 }
 
 let teamsRegionFilter = "";
+let teamsStatusFilter = "";
 
 async function showTeams() {
   const [teams, regions] = await Promise.all([api("teams"), api("regions")]);
   // A region with subregions (APAC) shows the teams of all its leagues.
-  const inFilter = team => teamsRegionFilter === "" || team.league === teamsRegionFilter
+  const inRegion = team => teamsRegionFilter === "" || team.league === teamsRegionFilter
     || regions.find(region => region.regionId === team.league)?.parentId === teamsRegionFilter;
+  const inFilter = team => inRegion(team) && (teamsStatusFilter === "" || team.status === teamsStatusFilter);
+  const statusFilterOptions = [["", "Any status"], ["active", "Active"], ["relegated", "Relegated"], ["disbanded", "Disbanded"]]
+    .map(([status, label]) => `<option value="${status}" ${status === teamsStatusFilter ? "selected" : ""}>${label}</option>`)
+    .join("");
   const shownTeams = teams.filter(inFilter);
   const regionFilterOptions = [{ regionId: "", name: "All regions" }, ...regions]
     .map(region => `<option value="${region.regionId}" ${region.regionId === teamsRegionFilter ? "selected" : ""}>${region.parentId ? "— " : ""}${escapeHtml(region.name)}</option>`)
@@ -189,13 +194,15 @@ async function showTeams() {
       <form class="inline" id="bulk-status">
         <span id="selected-count" class="muted">None selected</span>
         <select name="status" aria-label="Status">${["relegated", "disbanded", "active"].map(status => `<option>${status}</option>`).join("")}</select>
-        <input name="effectiveOn" type="date" value="${today()}" required aria-label="From">
+        <label><input type="checkbox" name="afterLastMap" checked> from the day after each team's last map</label>
+        <input name="effectiveOn" type="date" value="${today()}" aria-label="From">
         <input name="note" placeholder="Note" aria-label="Note">
         <button class="primary">Set status for selected</button>
       </form>
     </fieldset>`}
     ${teams.length === 0 ? "" : `<form class="inline" id="region-filter">
       <select name="region" aria-label="Show teams from">${regionFilterOptions}</select>
+      <select name="status" aria-label="Show teams with status">${statusFilterOptions}</select>
       <span class="muted">${shownTeams.length} of ${teams.length} teams</span>
     </form>`}
     <table>
@@ -227,7 +234,8 @@ async function showTeams() {
           <form class="inline" data-status="${team.teamId}">
             <select name="status" aria-label="Status">${["active", "relegated", "disbanded"].map(status =>
               `<option ${status === team.status ? "selected" : ""}>${status}</option>`).join("")}</select>
-            <input name="effectiveOn" type="date" value="${today()}" required aria-label="From">
+            <label><input type="checkbox" name="afterLastMap" checked> from the day after its last map</label>
+            <input name="effectiveOn" type="date" value="${today()}" aria-label="From">
             <input name="note" placeholder="Note" aria-label="Note">
             <button>Set status</button>
           </form>
@@ -236,10 +244,12 @@ async function showTeams() {
     </table>
     <datalist id="merge-targets">${teams.map(team => `<option value="${escapeHtml(teamLabel(team))}"></option>`).join("")}</datalist>
     ${teams.length === 0 ? '<p class="muted">No teams yet; create them from Assign teams.</p>'
-      : shownTeams.length === 0 ? '<p class="muted">No teams in this region.</p>' : ""}`;
+      : shownTeams.length === 0 ? '<p class="muted">No teams match the filters.</p>' : ""}`;
 
-  view.querySelector("#region-filter select")?.addEventListener("change", event => {
-    teamsRegionFilter = event.target.value;
+  view.querySelector("#region-filter")?.addEventListener("change", () => {
+    const values = formValues(view.querySelector("#region-filter"));
+    teamsRegionFilter = values.region;
+    teamsStatusFilter = values.status;
     route(false);
   });
 
@@ -280,7 +290,13 @@ async function showTeams() {
   }));
   view.querySelectorAll("[data-status]").forEach(form => form.addEventListener("submit", event => {
     event.preventDefault();
-    change(() => api(`teams/${form.dataset.status}/status`, { method: "POST", body: formValues(form) }), "Status saved.");
+    const values = formValues(form);
+    const afterLastMap = values.afterLastMap === "on" && values.status !== "active";
+    if (!afterLastMap && !values.effectiveOn) return show("Pick the date the status starts.", "error");
+    change(() => api("teams/status", {
+      method: "POST",
+      body: { teamIds: [Number(form.dataset.status)], status: values.status, effectiveOn: afterLastMap ? null : values.effectiveOn, note: values.note, afterLastMap },
+    }), "Status saved. Run a full recalculation to see it in the rankings.");
   }));
 
   const selectBoxes = [...view.querySelectorAll("[data-select]")];
@@ -304,10 +320,15 @@ async function showTeams() {
     const teamIds = selectedTeamIds();
     if (teamIds.length === 0) return show("Tick the teams to change first.", "error");
     const values = formValues(event.target);
+    const afterLastMap = values.afterLastMap === "on" && values.status !== "active";
+    if (!afterLastMap && !values.effectiveOn) return show("Pick the date the status starts.", "error");
+    const from = afterLastMap ? "the day after each team's last map" : values.effectiveOn;
     const names = teams.filter(team => teamIds.includes(team.teamId)).map(team => team.name ?? `Team ${team.teamId}`);
-    if (!confirm(`Mark ${teamIds.length} team(s) ${values.status} from ${values.effectiveOn}?\n\n${names.join("\n")}`)) return;
-    change(() => api("teams/status", { method: "POST", body: { ...values, teamIds } }),
-      `Marked ${teamIds.length} team(s) ${values.status} from ${values.effectiveOn}.`);
+    if (!confirm(`Mark ${teamIds.length} team(s) ${values.status} from ${from}?\n\n${names.join("\n")}`)) return;
+    change(() => api("teams/status", {
+      method: "POST",
+      body: { teamIds, status: values.status, effectiveOn: afterLastMap ? null : values.effectiveOn, note: values.note, afterLastMap },
+    }), `Marked ${teamIds.length} team(s) ${values.status} from ${from}. Run a full recalculation to see it in the rankings.`);
   });
 }
 
@@ -428,6 +449,7 @@ async function showSkipped() {
 
 let rankingsDate = "";
 let rankingsRegionFilter = "";
+let rankingsShowUnranked = false;
 
 function signedChange(change) {
   if (change === null || change === undefined) return "–";
@@ -445,18 +467,21 @@ async function showRankings() {
   // A region with subregions (APAC) shows the teams of all its leagues.
   const inFilter = league => rankingsRegionFilter === "" || league === rankingsRegionFilter
     || regions.find(region => region.regionId === league)?.parentId === rankingsRegionFilter;
-  const shownTeams = rankings.teams.filter(team => inFilter(team.league));
+  const unrankedCount = rankings.teams.filter(team => team.rank === null && inFilter(team.league)).length;
+  const shownTeams = rankings.teams.filter(team => inFilter(team.league) && (rankingsShowUnranked || team.rank !== null));
   const regionFilterOptions = [{ regionId: "", name: "All regions" }, ...regions]
     .map(region => `<option value="${region.regionId}" ${region.regionId === rankingsRegionFilter ? "selected" : ""}>${region.parentId ? "— " : ""}${escapeHtml(region.name)}</option>`)
     .join("");
   view.innerHTML = `
     <h1>Rankings</h1>
     <p class="lead">The ratings your local runs saved in this rankings.db, as they stood at the end of the chosen day.
-      Rating = league rating + the team's offset. Teams under 10 rated maps are provisional; a team without a rank
-      (for example relegated or disbanded) is not ranked that day. The live site changes only once this file is pushed and published.</p>
+      Rating = league rating + the team's offset. Teams under 10 rated maps are provisional. Teams marked relegated or
+      disbanded on that day have no rank and are hidden unless you tick the box, even if they still play; marking
+      them active ranks them again. A status change shows here after the next recalculation. The live site changes only once this file is pushed and published.</p>
     <form class="inline" id="rankings-filter">
       <input name="date" type="date" value="${rankings.date}" min="${rankings.firstDate}" max="${rankings.lastDate}" aria-label="Day">
       <select name="region" aria-label="Show teams from">${regionFilterOptions}</select>
+      <label><input type="checkbox" name="unranked" ${rankingsShowUnranked ? "checked" : ""}> Show ${unrankedCount} unranked (relegated, disbanded)</label>
       ${rankingsDate ? '<button type="button" id="latest-day">Latest day</button>' : ""}
       <span class="muted">${shownTeams.length} team(s) · rated ${rankings.firstDate} to ${rankings.lastDate}</span>
     </form>
@@ -493,6 +518,7 @@ async function showRankings() {
     const values = formValues(filterForm);
     rankingsDate = values.date === rankings.lastDate ? "" : values.date;
     rankingsRegionFilter = values.region;
+    rankingsShowUnranked = values.unranked === "on";
     route(false);
   });
   filterForm.addEventListener("submit", event => event.preventDefault());
