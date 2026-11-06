@@ -49,24 +49,37 @@ public sealed class MatchImport(RankingsDb db, IReadOnlyList<IArchiveStore> arch
     /// Reads archived days back through the parser, e.g. after a team was assigned, so maps
     /// skipped for it are stored without fetching again.
     /// </summary>
-    public async Task<ImportSummary> ReparseAsync(IArchiveStore archive, DateOnly from, DateOnly to, CancellationToken cancellationToken = default)
+    /// <param name="log">Progress for a long read-back: every <see cref="ReparseLogEvery"/> days and when storing.</param>
+    public async Task<ImportSummary> ReparseAsync(IArchiveStore archive, DateOnly from, DateOnly to,
+        CancellationToken cancellationToken = default, Action<string>? log = null)
     {
         var maps = new List<SourceMap>();
         var skipped = new List<SkippedSourceMap>();
         var missing = new List<DateOnly>();
         var days = 0;
+        var totalDays = to.DayNumber - from.DayNumber + 1;
+        var position = 0;
         for (var day = from; day <= to; day = day.AddDays(1))
         {
+            position++;
             if (await archive.ReadAsync(LpdbArchive.Key(day), cancellationToken) is not { } content)
-            {
                 missing.Add(day);
-                continue;
+            else
+            {
+                LpdbArchive.Parse(LpdbArchive.Decompress(content), maps, skipped);
+                days++;
             }
-            LpdbArchive.Parse(LpdbArchive.Decompress(content), maps, skipped);
-            days++;
+            if (position % ReparseLogEvery == 0 || position == totalDays)
+                log?.Invoke($"Read {position}/{totalDays} archived day(s) from {archive.Name}, through {day:yyyy-MM-dd}: "
+                    + $"{maps.Count} map(s) so far, {missing.Count} day(s) missing.");
         }
-        return Store(maps, skipped, days) with { MissingDays = missing };
+        log?.Invoke($"Storing {maps.Count} map(s) from {days} archived day(s).");
+        var summary = Store(maps, skipped, days) with { MissingDays = missing };
+        log?.Invoke($"Stored {summary.Maps} map(s), {summary.Skipped} skipped.");
+        return summary;
     }
+
+    public const int ReparseLogEvery = 100;
 
     /// <summary>
     /// Fetches a month at a time from <paramref name="from"/>, or from the day after the last

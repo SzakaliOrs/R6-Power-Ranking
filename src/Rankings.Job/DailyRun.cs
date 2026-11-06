@@ -24,6 +24,9 @@ public sealed record DailyRunOptions
 
     /// <summary>The oldest day a full recalculation reads.</summary>
     public DateOnly EarliestDay { get; init; } = new(2023, 1, 1);
+
+    /// <summary>Progress lines as the run goes, e.g. to the console, so a long run shows where it is.</summary>
+    public Action<string>? Log { get; init; }
 }
 
 /// <param name="RatedFrom">First day rated this run; null when there was nothing to rate.</param>
@@ -41,7 +44,14 @@ public sealed record DailyRunSummary(
     int UnassignedTeams,
     int LateMaps,
     int ReparsedDays,
-    IReadOnlyList<DateOnly> MissingDays);
+    IReadOnlyList<DateOnly> MissingDays)
+{
+    /// <summary>
+    /// Teams the saved rating state still held but the database no longer has (merged in the admin
+    /// dashboard); a run that finds any rebuilds every rating instead of carrying on.
+    /// </summary>
+    public IReadOnlyList<int> RemovedTeams { get; init; } = [];
+}
 
 /// <summary>
 /// One daily run. It fetches yesterday and the <see cref="DailyRunOptions.LookbackDays"/> days
@@ -72,8 +82,18 @@ public sealed class DailyRun(
         if (yesterday < options.EarliestDay)
             throw new DailyRunException($"Yesterday ({yesterday:yyyy-MM-dd}) is before {options.EarliestDay:yyyy-MM-dd}; there is nothing to rate.");
 
+        // A merge deletes a team the saved state still rates; carrying on from it would save
+        // snapshots of a team that no longer exists, so such a run rebuilds everything instead.
+        List<int> removedTeams = options.Full ? [] : store.TeamsRemovedSinceSettled();
+        options = removedTeams.Count > 0 ? options with { Full = true } : options;
+        var log = options.Log;
+        if (removedTeams.Count > 0)
+            log?.Invoke($"Team(s) {string.Join(", ", removedTeams)} were merged away since the last full recalculation: rebuilding every rating.");
         if (options.Full)
+        {
+            log?.Invoke("Full recalculation: clearing the stored ratings.");
             store.ResetForFullRecalculation();
+        }
         var settled = store.SettledThrough;
         var import = new MatchImport(db, archives, _time);
 
@@ -90,14 +110,18 @@ public sealed class DailyRun(
             // Older days first, so players are numbered in the order they first played.
             if (options.Full && fetchFrom > options.EarliestDay)
             {
-                var reparsed = await import.ReparseAsync(archiveToRead, options.EarliestDay, fetchFrom.AddDays(-1), cancellationToken);
+                log?.Invoke($"Reading {options.EarliestDay:yyyy-MM-dd}..{fetchFrom.AddDays(-1):yyyy-MM-dd} back from {archiveToRead.Name}.");
+                var reparsed = await import.ReparseAsync(archiveToRead, options.EarliestDay, fetchFrom.AddDays(-1), cancellationToken, log);
                 (reparsedDays, missingDays) = (reparsed.Days, reparsed.MissingDays ?? []);
             }
             else if (!options.Full)
                 reparsedDays = await ReparseNewlyAssignedAsync(store, import, fetchFrom, yesterday, cancellationToken);
+            if (fetchFrom <= yesterday)
+                log?.Invoke($"Fetching {fetchFrom:yyyy-MM-dd}..{yesterday:yyyy-MM-dd} from the source.");
             fetched = fetchFrom <= yesterday
                 ? await import.FetchAsync(source, fetchFrom, yesterday, cancellationToken)
                 : new ImportSummary(0, 0, 0, new ProviderIds(db).UnassignedTeams().Count);
+            log?.Invoke($"Fetched {fetched.Maps} map(s), {fetched.Skipped} skipped.");
         }
 
         var maps = db.LoadMaps();
@@ -106,7 +130,7 @@ public sealed class DailyRun(
         var lateMaps = maps.Count(map => RatingsStore.DayOf(map.PlayedAt) < ratedFrom);
         if (ratedFrom > yesterday)
             return new DailyRunSummary(null, yesterday, settled, fetched.Maps, 0, fetched.Skipped, fetched.UnassignedTeams,
-                lateMaps, reparsedDays, missingDays);
+                lateMaps, reparsedDays, missingDays) { RemovedTeams = removedTeams };
 
         var newSettled = yesterday.AddDays(-options.LookbackDays);
         var mapsByDay = maps.Where(map => RatingsStore.DayOf(map.PlayedAt) >= ratedFrom).ToLookup(map => RatingsStore.DayOf(map.PlayedAt));
@@ -121,6 +145,7 @@ public sealed class DailyRun(
         var droppedTeams = store.DroppedTeams();
 
         var ratedMaps = 0;
+        log?.Invoke($"Rating {ratedFrom:yyyy-MM-dd}..{yesterday:yyyy-MM-dd} ({yesterday.DayNumber - ratedFrom.DayNumber + 1} day(s), {maps.Count} map(s) waiting).");
         using (var tx = db.Connection.BeginTransaction())
         {
             store.ClearFrom(ratedFrom, tx);
@@ -136,13 +161,18 @@ public sealed class DailyRun(
                     store.Settle(day, ratedFrom, state, tx);
                     settled = day;
                 }
+                // A line per finished month on long runs; a daily run's few days need none.
+                if (day.AddDays(1).Day == 1 && yesterday.DayNumber - ratedFrom.DayNumber > 31)
+                    log?.Invoke($"Rated through {day:yyyy-MM-dd}: {ratedMaps} map(s), {state.Teams.Count} team(s) so far.");
             }
+            log?.Invoke("Saving the ratings.");
             store.SaveCurrentRatings(state, yesterday, tx);
             tx.Commit();
         }
+        log?.Invoke($"Rated {ratedMaps} map(s) through {yesterday:yyyy-MM-dd}.");
 
         return new DailyRunSummary(ratedFrom, yesterday, settled, fetched.Maps, ratedMaps, fetched.Skipped,
-            fetched.UnassignedTeams, lateMaps, reparsedDays, missingDays);
+            fetched.UnassignedTeams, lateMaps, reparsedDays, missingDays) { RemovedTeams = removedTeams };
     }
 
     /// <summary>Writes the site's JSON from what the runs stored; false while nothing is rated yet.</summary>

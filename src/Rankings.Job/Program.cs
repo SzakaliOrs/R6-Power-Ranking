@@ -113,8 +113,12 @@ async Task<int> RunDaily(Cli cli)
         DataSource = sourceName,
         Full = full,
         FetchWholeHistory = full && synthetic,
+        Log = Log,
     });
 
+    if (summary.RemovedTeams.Count > 0)
+        Warn($"Team(s) {string.Join(", ", summary.RemovedTeams)} were merged away since the last full recalculation, "
+            + "so this run rebuilt every rating from the archive.");
     Console.WriteLine(summary.RatedFrom is { } ratedFrom
         ? $"Rated {ratedFrom:yyyy-MM-dd} through {summary.RatedThrough:yyyy-MM-dd}: {summary.RatedMaps} map(s)."
         : $"Nothing new to rate through {summary.RatedThrough:yyyy-MM-dd}.");
@@ -134,6 +138,7 @@ async Task<int> RunDaily(Cli cli)
         Warn($"{summary.LateMaps} map(s) were stored for days already settled. Run a full recalculation to rate them.");
 
     var siteOut = cli.Value("site-out") ?? Path.Combine("web", "public", "data");
+    Log($"Writing the site's data to {siteOut}.");
     if (dailyRun.ExportSite(siteOut, sourceName))
         Console.WriteLine($"Wrote the site's data to {siteOut}.");
     else

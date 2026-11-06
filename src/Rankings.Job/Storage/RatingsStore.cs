@@ -53,6 +53,18 @@ public sealed class RatingsStore(RankingsDb db)
         RatingStateJson.Read(db.GetState(SettledStateKey)
             ?? throw new InvalidDataException($"run_state has {SettledThroughKey} but no {SettledStateKey}."));
 
+    /// <summary>
+    /// Teams the saved rating state holds that the teams table no longer has, e.g. a duplicate
+    /// merged into another team since the last full recalculation; none when nothing is settled.
+    /// </summary>
+    public List<int> TeamsRemovedSinceSettled()
+    {
+        if (SettledThrough is null || db.GetState(SettledStateKey) is null)
+            return [];
+        var existing = Rows("SELECT team_id FROM teams", reader => reader.GetInt32(0)).ToHashSet();
+        return [.. LoadSettledState().Teams.Keys.Where(teamId => !existing.Contains(teamId)).Order()];
+    }
+
     /// <summary>Records the data source on the first run and refuses a different one afterwards.</summary>
     public void CheckDataSource(string dataSource)
     {
@@ -92,12 +104,17 @@ public sealed class RatingsStore(RankingsDb db)
         Rows("SELECT team_id, region_id FROM teams", reader => (reader.GetInt32(0), reader.GetString(1)))
             .ToDictionary(row => row.Item1, row => row.Item2);
 
-    /// <summary>Teams relegated or disbanded, by the day the admin set it to take effect.</summary>
+    /// <summary>
+    /// Teams relegated or disbanded, by the day the admin set it to take effect. Of a team's changes
+    /// on one day only the last entered counts, as for <see cref="UnrankedTeams()"/>: a team marked
+    /// disbanded and set back to active on the same day is never frozen.
+    /// </summary>
     public ILookup<DateOnly, int> Freezes() =>
-        Rows("SELECT team_id, effective_on, payload FROM overrides WHERE kind = 'status' AND team_id IS NOT NULL ORDER BY override_id",
-                reader => (TeamId: reader.GetInt32(0), Day: ParseDay(reader.GetString(1)), Payload: reader.GetString(2)))
-            .Where(row => FreezesTeam(row.Payload))
-            .ToLookup(row => row.Day, row => row.TeamId);
+        StatusChanges()
+            // GroupBy keeps each group's changes in the order they were entered.
+            .GroupBy(change => (change.TeamId, change.Day))
+            .Where(changesThatDay => changesThatDay.Last().Unranked)
+            .ToLookup(changesThatDay => changesThatDay.Key.Day, changesThatDay => changesThatDay.Key.TeamId);
 
     static bool FreezesTeam(string statusPayload)
     {
@@ -125,9 +142,12 @@ public sealed class RatingsStore(RankingsDb db)
         .ToLookup(row => DayOf(DateTimeOffset.FromUnixTimeSeconds(row.LastMapAt)), row => row.TeamId);
 
     /// <summary>Every status change the admin made, for working out which teams are unranked on a day.</summary>
-    public UnrankedTeams UnrankedTeams() =>
-        new([.. Rows("SELECT team_id, effective_on, payload FROM overrides WHERE kind = 'status' AND team_id IS NOT NULL ORDER BY override_id",
-                reader => new StatusChange(reader.GetInt32(0), ParseDay(reader.GetString(1)), FreezesTeam(reader.GetString(2))))]);
+    public UnrankedTeams UnrankedTeams() => new(StatusChanges());
+
+    /// <summary>Every status override, in the order it was entered.</summary>
+    List<StatusChange> StatusChanges() =>
+        Rows("SELECT team_id, effective_on, payload FROM overrides WHERE kind = 'status' AND team_id IS NOT NULL ORDER BY override_id",
+            reader => new StatusChange(reader.GetInt32(0), ParseDay(reader.GetString(1)), FreezesTeam(reader.GetString(2))));
 
     /// <summary>
     /// Days with maps skipped only because a team was unassigned, where every such team is

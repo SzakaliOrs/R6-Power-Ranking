@@ -104,7 +104,72 @@ public sealed class DailyRunTests : IDisposable
             $"SELECT COUNT(*) FROM rated_maps WHERE played_at >= {Start(new DateOnly(2026, 3, 1))} AND played_at < {Start(settled.AddDays(1))}")));
     }
 
+    [Fact]
+    public async Task ATeamMarkedDisbandedAndSetBackToActiveTheSameDay_StaysRanked()
+    {
+        var baseline = NewDatabase();
+        await RunAWeek(baseline, _ => new SimulatedMatchSource(World));
+        var lastDay = "2026-03-08";
+        var rankedTeam = int.Parse(Rows(baseline, $"""
+            SELECT team_id FROM team_snapshots
+            WHERE date = '{lastDay}' AND rank IS NOT NULL
+              AND team_id NOT IN (SELECT team_id FROM overrides WHERE team_id IS NOT NULL)
+            ORDER BY rank LIMIT 1
+            """).Single(), CultureInfo.InvariantCulture);
+
+        // The admin marks every team disbanded, then sets the ones still playing back to active.
+        var db = NewDatabase();
+        var changeDay = "2026-03-05";
+        db.Execute($$"""
+            INSERT INTO overrides (kind, team_id, effective_on, payload) VALUES
+                ('status', {{rankedTeam}}, '{{changeDay}}', '{"status":"disbanded"}'),
+                ('status', {{rankedTeam}}, '{{changeDay}}', '{"status":"active"}');
+            """);
+        await RunAWeek(db, _ => new SimulatedMatchSource(World));
+
+        Assert.DoesNotContain(rankedTeam, new RatingsStore(db).Freezes()[DateOnly.Parse(changeDay, CultureInfo.InvariantCulture)]);
+        Assert.Equal(Rows(baseline, $"SELECT date, rank, rating FROM team_snapshots WHERE team_id = {rankedTeam} ORDER BY date"),
+            Rows(db, $"SELECT date, rank, rating FROM team_snapshots WHERE team_id = {rankedTeam} ORDER BY date"));
+    }
+
+    [Fact]
+    public void Freezes_FollowTheLastStatusEnteredForTheDay()
+    {
+        var db = NewDatabase();
+        var untouchedTeams = Rows(db, "SELECT team_id FROM teams WHERE team_id NOT IN (SELECT team_id FROM overrides WHERE team_id IS NOT NULL) ORDER BY team_id LIMIT 2")
+            .Select(teamId => int.Parse(teamId, CultureInfo.InvariantCulture)).ToList();
+        var (setBackToActive, disbandedAfterAll) = (untouchedTeams[0], untouchedTeams[1]);
+        db.Execute($$"""
+            INSERT INTO overrides (kind, team_id, effective_on, payload) VALUES
+                ('status', {{setBackToActive}}, '2026-03-05', '{"status":"disbanded"}'),
+                ('status', {{disbandedAfterAll}}, '2026-03-05', '{"status":"active"}'),
+                ('status', {{setBackToActive}}, '2026-03-05', '{"status":"active"}'),
+                ('status', {{disbandedAfterAll}}, '2026-03-05', '{"status":"disbanded"}');
+            """);
+
+        var frozenThatDay = new RatingsStore(db).Freezes()[new DateOnly(2026, 3, 5)].ToList();
+
+        Assert.DoesNotContain(setBackToActive, frozenThatDay);
+        Assert.Contains(disbandedAfterAll, frozenThatDay);
+    }
+
     // What a run leaves behind
+
+    [Fact]
+    public async Task TeamsRemovedSinceSettled_FindsATeamTheSavedStateStillRates()
+    {
+        var db = NewDatabase();
+        var clock = new FakeTimeProvider(FirstRunAt);
+        await Runner(db, new SimulatedMatchSource(World), clock).RunAsync(FullFromSimulation);
+        var store = new RatingsStore(db);
+        Assert.Empty(store.TeamsRemovedSinceSettled());
+
+        // What a merge in the admin dashboard leaves: the team is gone, the saved state still has it.
+        var mergedAway = store.LoadSettledState().Teams.Keys.Max();
+        db.Execute($"PRAGMA foreign_keys = OFF; DELETE FROM teams WHERE team_id = {mergedAway}; PRAGMA foreign_keys = ON;");
+
+        Assert.Equal([mergedAway], store.TeamsRemovedSinceSettled());
+    }
 
     [Fact]
     public async Task SettledDays_LeaveTheMapsTableButKeepTheirRatedMaps()
