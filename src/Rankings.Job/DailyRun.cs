@@ -72,7 +72,8 @@ public sealed class DailyRun(
     RatingSettings settings,
     TimeProvider? time = null)
 {
-    public const string AlgorithmVersion = "elo-1";
+    /// <summary>Stamped on every snapshot. elo-2: a team that signs another team's core takes over its rating.</summary>
+    public const string AlgorithmVersion = "elo-2";
 
     readonly TimeProvider _time = time ?? TimeProvider.System;
 

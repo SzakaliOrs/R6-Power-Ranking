@@ -25,7 +25,8 @@ INSERT INTO regions (region_id, name, parent_id, rating) VALUES
     ('OCE',    'Oceania',       'APAC', 1500),
     ('APAC-N', 'APAC North',    'APAC', 1500);
 
--- A team is a roster core. An organisation that moves region fields a new team; the region
+-- A team's rating belongs to its roster core: a new core is rated afresh under the same team, and a
+-- core signed by another team takes its rating there. An organisation that moves region fields a new team; the region
 -- only changes to correct a wrong assignment (the admin dashboard's Change league).
 CREATE TABLE teams (
     team_id     INTEGER PRIMARY KEY,

@@ -189,6 +189,207 @@ public class RatingRulesTests
         Assert.True(rated.Team(1).IsProvisional(Settings));
     }
 
+    // A core signed by another team
+
+    /// <summary>
+    /// Team 1 at +100 with 40 maps, last played a week ago, holds <see cref="LineupOne"/>, whose
+    /// players remember it; team 3 has its own lineup.
+    /// </summary>
+    static RatingState StateWithCoreToSign()
+    {
+        var state = State();
+        state.Team(1).Offset = 100;
+        state.Team(1).RatedMaps = 40;
+        state.Team(1).LastPlayedAt = Day.AddDays(-7);
+        state.Team(1).Lineup = LineupOne;
+        state.Team(2).Lineup = LineupTwo;
+        state.Team(3).Lineup = [31, 32, 33, 34, 35];
+        foreach (var playerId in LineupOne)
+            state.SetPlayer(playerId, new PlayerRating(1, 100, 0, 40));
+        return state;
+    }
+
+    [Fact]
+    public void CoreTakeover_ATeamSigningAnotherTeamsCoreTakesOverItsRating()
+    {
+        var map = Map(3, 2, 7, 5, playersA: [11, 12, 13, 14, 36], playersB: LineupTwo);
+        var rated = StateWithCoreToSign();
+        // Team 3 continues team 1's rating with one new player's pull; team 1 drops out unrated.
+        var byHand = State();
+        byHand.Team(1).Offset = 100;
+        byHand.Team(1).Seeded = false;
+        byHand.Team(3).Offset = 100 * (1 - Settings.NewPlayerPull);
+        byHand.Team(3).BoostMapsLeft = Settings.RosterChangeBoostMaps;
+
+        var run = Engine.Rate(rated, [map], Day);
+        RateByHand(byHand, map);
+
+        AssertSameOffsets(byHand, rated);
+        Assert.Equal(
+            [
+                new RosterEvent(Day, 1, RosterEventKind.CoreLost, OtherTeamId: 3),
+                new RosterEvent(Day, 3, RosterEventKind.TookOverCore, NewPlayers: 1, OtherTeamId: 1),
+            ],
+            run.Events);
+        Assert.False(rated.Team(1).Seeded);
+        Assert.Empty(rated.Team(1).Lineup);
+        Assert.Equal(41, rated.Team(3).RatedMaps);
+        Assert.False(rated.Team(3).IsProvisional(Settings));
+        Assert.DoesNotContain(1, Replay.Ranking(rated));
+    }
+
+    [Fact]
+    public void CoreTakeover_TheTeamThatLostItsCoreIsSeededFromItsNewPlayers()
+    {
+        var state = StateWithCoreToSign();
+        Engine.Rate(state, [Map(3, 2, 7, 5, playersA: LineupOne, playersB: LineupTwo)], Day);
+        var teamFourOffset = state.Team(4).Offset;
+        var predictions = new List<double>();
+
+        var run = Engine.Rate(state, [Map(1, 4, 7, 5, "s2", playedAt: Day.AddDays(1), playersA: [41, 42, 43, 44, 45])],
+            Day.AddDays(1), (_, chanceTeamAWins) => predictions.Add(chanceTeamAWins));
+
+        Assert.Equal(new RosterEvent(Day.AddDays(1), 1, RosterEventKind.NewCore), Assert.Single(run.Events));
+        Assert.Equal(Elo.Expected(-Settings.NewcomerGap, teamFourOffset), Assert.Single(predictions), 9);
+        Assert.True(state.Team(1).IsProvisional(Settings));
+    }
+
+    [Fact]
+    public void CoreTakeover_AfterTheFormerTeamFieldedANewCoreThePlayersBringTheRatingTheyLeftWith()
+    {
+        var state = StateWithCoreToSign();
+        var predictions = new List<double>();
+
+        // Team 1 plays first with five newcomers, then team 3 fields team 1's old core.
+        var run = Engine.Rate(state,
+            [
+                Map(1, 2, 7, 5, "s1", playedAt: Day, playersA: [41, 42, 43, 44, 45], playersB: LineupTwo),
+                Map(3, 4, 7, 5, "s2", playedAt: Day.AddHours(3), playersA: LineupOne),
+            ],
+            Day.AddDays(1), (_, chanceTeamAWins) => predictions.Add(chanceTeamAWins));
+
+        Assert.Equal(Elo.Expected(1600, 1500), predictions[1], 9);
+        Assert.Contains(new RosterEvent(Day.AddHours(3), 3, RosterEventKind.TookOverCore, NewPlayers: 0, OtherTeamId: 1), run.Events);
+        Assert.DoesNotContain(run.Events, rosterEvent => rosterEvent.Kind == RosterEventKind.CoreLost);
+        Assert.True(state.Team(1).Seeded);
+        Assert.Equal(41, state.Team(3).RatedMaps);
+    }
+
+    [Fact]
+    public void CoreTakeover_ADisbandedTeamsCoreKeepsItsRatingAtItsNewTeam()
+    {
+        var state = StateWithCoreToSign();
+        RatingEngine.Freeze(state, 1);
+        state.AddNewTeam(9, "EU");
+        var predictions = new List<double>();
+
+        var run = Engine.Rate(state, [Map(9, 2, 7, 5, playersA: LineupOne, playersB: LineupTwo)], Day,
+            (_, chanceTeamAWins) => predictions.Add(chanceTeamAWins));
+
+        Assert.Equal(Elo.Expected(1600, 1500), Assert.Single(predictions), 9);
+        Assert.Equal(
+            [
+                new RosterEvent(Day, 1, RosterEventKind.CoreLost, OtherTeamId: 9),
+                new RosterEvent(Day, 9, RosterEventKind.TookOverCore, NewPlayers: 0, OtherTeamId: 1),
+            ],
+            run.Events);
+        Assert.False(state.Team(1).IsFrozen);
+        Assert.False(state.Team(1).Seeded);
+    }
+
+    /// <summary>+100 after 200 days away: 110 days past the threshold start 4 periods, each closing 10% of the gap to −50.</summary>
+    static readonly double HundredAfterTwoHundredDaysAway = -Settings.NewcomerGap + (100 + Settings.NewcomerGap) * Math.Pow(1 - Settings.InactivityDecay, 4);
+
+    [Fact]
+    public void CoreTakeover_ACoreBackAfterTimeAwayDecaysForIt()
+    {
+        var state = StateWithCoreToSign();
+        // Team 1 has fielded a new core since; its old core last played 200 days ago.
+        state.Team(1).CoreGeneration = 1;
+        foreach (var playerId in LineupOne)
+            state.SetPlayer(playerId, new PlayerRating(1, 100, 0, 40, Day.AddDays(-200)));
+        var predictions = new List<double>();
+
+        Engine.Rate(state, [Map(3, 4, 7, 5, playersA: LineupOne)], Day, (_, chanceTeamAWins) => predictions.Add(chanceTeamAWins));
+
+        Assert.Equal(Elo.Expected(1500 + HundredAfterTwoHundredDaysAway, 1500), Assert.Single(predictions), 9);
+    }
+
+    [Fact]
+    public void CoreTakeover_ADisbandedTeamsCoreDecaysForTheTimeAway()
+    {
+        var state = StateWithCoreToSign();
+        state.Team(1).LastPlayedAt = Day.AddDays(-200);
+        RatingEngine.Freeze(state, 1);
+        state.AddNewTeam(9, "EU");
+        var predictions = new List<double>();
+
+        Engine.Rate(state, [Map(9, 2, 7, 5, playersA: LineupOne, playersB: LineupTwo)], Day,
+            (_, chanceTeamAWins) => predictions.Add(chanceTeamAWins));
+
+        Assert.Equal(Elo.Expected(1500 + HundredAfterTwoHundredDaysAway, 1500), Assert.Single(predictions), 9);
+    }
+
+    [Fact]
+    public void CoreTakeover_ACoreMovingToAnotherLeagueKeepsItsRatingNotItsOffset()
+    {
+        var state = new RatingState();
+        state.AddLeague("EU", 1500);
+        state.AddLeague("NA", 1450);
+        state.AddTeam(1, "EU", 100).Lineup = LineupOne;
+        state.AddTeam(2, "EU").Lineup = LineupTwo;
+        state.AddTeam(5, "NA").Lineup = [51, 52, 53, 54, 55];
+        foreach (var playerId in LineupOne)
+            state.SetPlayer(playerId, new PlayerRating(1, 100));
+        var predictions = new List<double>();
+
+        Engine.Rate(state, [Map(5, 2, 7, 5, playersA: LineupOne, playersB: LineupTwo)], Day,
+            (_, chanceTeamAWins) => predictions.Add(chanceTeamAWins));
+
+        // 1600 in EU is 150 above NA's 1450.
+        Assert.Equal(Elo.Expected(1600, 1500), Assert.Single(predictions), 9);
+    }
+
+    [Fact]
+    public void CoreTakeover_OnlyTheFirstOfTwoTeamsSplittingASixPlayerCoreTakesItOver()
+    {
+        var state = StateWithCoreToSign();
+        state.Team(1).Lineup = [11, 12, 13, 14, 15, 16];
+        state.SetPlayer(16, new PlayerRating(1, 100, 0, 40));
+        state.Team(4).Lineup = [41, 42, 43, 44, 45];
+
+        var run = Engine.Rate(state,
+            [
+                Map(3, 2, 7, 5, "s1", playedAt: Day, playersA: [11, 12, 13, 51, 52], playersB: LineupTwo),
+                Map(4, 2, 7, 5, "s2", playedAt: Day.AddHours(3), playersA: [14, 15, 16, 61, 62], playersB: LineupTwo),
+            ],
+            Day.AddDays(1));
+
+        Assert.Equal(3, Assert.Single(run.Events, rosterEvent => rosterEvent.Kind == RosterEventKind.TookOverCore).TeamId);
+        Assert.Contains(new RosterEvent(Day.AddHours(3), 4, RosterEventKind.NewCore), run.Events);
+    }
+
+    [Fact]
+    public void CoreTakeover_NoneWhenTheFormerTeamCarriedOnWithACoreOfOtherPlayers()
+    {
+        // Team 1 was listed with six; it keeps three of them, and team 3 signs the other three.
+        int[] sixListed = [11, 12, 13, 14, 15, 16];
+        var state = StateWithCoreToSign();
+        state.Team(1).Lineup = sixListed;
+        state.SetPlayer(16, new PlayerRating(1, 100, 0, 40));
+
+        var run = Engine.Rate(state,
+            [
+                Map(1, 2, 7, 5, "s1", playedAt: Day, playersA: [11, 12, 13, 41, 42], playersB: LineupTwo),
+                Map(3, 4, 7, 5, "s2", playedAt: Day.AddHours(3), playersA: [14, 15, 16, 51, 52]),
+            ],
+            Day.AddDays(1));
+
+        Assert.DoesNotContain(run.Events, rosterEvent => rosterEvent.Kind is RosterEventKind.TookOverCore or RosterEventKind.CoreLost);
+        Assert.Contains(new RosterEvent(Day.AddHours(3), 3, RosterEventKind.NewCore), run.Events);
+        Assert.True(state.Team(1).Seeded);
+    }
+
     // Seeding
 
     [Fact]
@@ -210,6 +411,26 @@ public class RatingRulesTests
         AssertSameOffsets(byHand, rated);
         Assert.Equal(new RosterEvent(Day, 9, RosterEventKind.Seeded), Assert.Single(run.Events));
         Assert.Equal(newLineup, rated.Team(9).Lineup);
+    }
+
+    [Fact]
+    public void Seeding_PlayersBackAfterTimeAwayBringADecayedOffset()
+    {
+        int[] newLineup = [11, 12, 13, 41, 42];
+        var map = Map(9, 2, 7, 5, playersA: newLineup);
+        var rated = State();
+        rated.AddNewTeam(9, "EU");
+        // Their team last played 200 days ago: 110 days past the threshold start 4 decay periods.
+        foreach (var playerId in (int[])[11, 12, 13])
+            rated.SetPlayer(playerId, new PlayerRating(1, 80, 0, 40, Day.AddDays(-200)));
+        var decayedOffset = -Settings.NewcomerGap + (80 + Settings.NewcomerGap) * Math.Pow(1 - Settings.InactivityDecay, 4);
+        var byHand = State();
+        byHand.AddTeam(9, "EU", (3 * Settings.SeedingShare * decayedOffset - 2 * Settings.NewcomerGap) / 5);
+
+        Engine.Rate(rated, [map], Day);
+        RateByHand(byHand, map);
+
+        AssertSameOffsets(byHand, rated);
     }
 
     [Fact]
@@ -247,8 +468,8 @@ public class RatingRulesTests
 
         Engine.Rate(state, [Map(1, 2, 7, 5, playersA: LineupOne, playersB: LineupTwo)], Day);
 
-        Assert.Equal(new PlayerRating(1, state.Team(1).Offset), state.Players[11]);
-        Assert.Equal(new PlayerRating(2, state.Team(2).Offset), state.Players[25]);
+        Assert.Equal(new PlayerRating(1, state.Team(1).Offset, state.Team(1).CoreGeneration, 1, Day), state.Players[11]);
+        Assert.Equal(new PlayerRating(2, state.Team(2).Offset, state.Team(2).CoreGeneration, 1, Day), state.Players[25]);
     }
 
     // A league new to the ratings (China in 2026)

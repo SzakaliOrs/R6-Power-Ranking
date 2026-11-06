@@ -133,7 +133,8 @@ async function showAssign() {
   view.innerHTML = `
     <h1>Assign teams</h1>
     <p class="lead">Team keys from Liquipedia not linked to a team yet; their maps are skipped until they are.
-      A new roster core gets a new team; a rebrand or a core that moved to another organisation links to its existing team.
+      A rebrand links to its existing team. A new organisation gets a new team, even when it signed another team's core:
+      the core's rating follows its players there.
       Afterwards, run the job's reparse command for the days they played so the skipped maps are stored.</p>
     ${unassigned.length === 0 ? '<p class="muted">Every team key is assigned.</p>' : unassigned.map(team => `
       <fieldset>

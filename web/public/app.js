@@ -287,6 +287,8 @@ const rosterLabels = {
   NewCore: "Most of the roster changed: rated as a new team",
   RosterChange: "Roster change",
   Returned: "Back in the top level",
+  TookOverCore: "Signed another team's core: took over its rating",
+  CoreLost: "Its core left for another team, which took the rating",
 };
 
 async function showTeam(teamId) {

@@ -21,11 +21,21 @@ each. APAC is three leagues (ASIA, OCE, APAC-N) grouped for display.
 
 Before a team plays a map, the engine also handles its roster, its history and the calendar:
 
-- **Seeding.** A new team starts from a share of its players' previous offsets. A player with no
-  rated history counts as `NewcomerGap` below the league.
+- **Seeding.** A new team starts from a share of its players' previous offsets, each first decayed
+  for the time since that player's team last played, as inactivity decay would have. A player with
+  no rated history counts as `NewcomerGap` below the league.
 - **Roster changes.** A lineup must keep `RosterCoreSize` (3) players from the last one to stay the
   same team. Each new player pulls the offset toward zero, and K is boosted for the next few maps.
   Fewer than 3 kept means the team is reseeded under the same ID.
+- **Core takeovers.** A team about to be seeded (new, or reseeded) whose lineup holds at least 3
+  players from one core of another team takes over that core's rating instead, as a roster change:
+  the rating (not the offset, so a move between leagues keeps its strength) and rated maps, each
+  other player's pull, and the boost. A team still holding that core loses it (`CoreLost`) and is
+  unrated until it plays again. If the former team had already started a new core, the players
+  bring the rating they left with. Either way the rating first decays for the time since the core
+  last played, as inactivity decay would have decayed it (`PlayerRating.LastPlayedAt`). `TeamRating.CoreGeneration`, copied into each `PlayerRating`,
+  tells these cases apart; once taken, the core's other players point to the new holder, so a
+  six-player listing split between two teams hands the rating to only one of them.
 - **Freezing.** A relegated or disbanded team keeps its rating and is not ranked. Its rating moves
   again if it plays, but `Snapshots.Take` leaves it unranked while the admin's status says
   relegated or disbanded. `DailyRating.RateDay` also freezes the teams it is given as dropped after

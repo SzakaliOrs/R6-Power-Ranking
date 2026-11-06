@@ -77,7 +77,11 @@ public sealed class RatingState
     }
 }
 
-/// <summary>One roster core's place in the ratings. Its league never changes.</summary>
+/// <summary>
+/// One team's place in the ratings. The rating belongs to its current roster core: a new core
+/// starts a new rating under the same ID, and a core another team signs takes the rating along.
+/// Its league never changes.
+/// </summary>
 public sealed class TeamRating(int teamId, string league)
 {
     public int TeamId { get; } = teamId;
@@ -105,6 +109,13 @@ public sealed class TeamRating(int teamId, string league)
     /// <summary>Players listed on the team's last rated map: the core the next lineup is compared with.</summary>
     public IReadOnlyList<int> Lineup { get; set; } = [];
 
+    /// <summary>
+    /// Counts the cores the team has had: it goes up whenever the team starts a new one (seeded, seeded
+    /// again, or taking over another team's core) and when another team takes its core. A player whose
+    /// record holds an older number played in a core the team has since left behind.
+    /// </summary>
+    public int CoreGeneration { get; set; }
+
     public bool IsFrozen => FrozenRating is not null;
 
     public bool IsProvisional(RatingSettings settings) => RatedMaps < settings.ProvisionalUntilMaps;
@@ -112,4 +123,7 @@ public sealed class TeamRating(int teamId, string league)
 
 /// <param name="TeamId">The player's last rated team.</param>
 /// <param name="Offset">That team's offset at the end of the run the player last played in.</param>
-public sealed record PlayerRating(int TeamId, double Offset);
+/// <param name="CoreGeneration">That team's <see cref="TeamRating.CoreGeneration"/> then: which of its cores the player was in.</param>
+/// <param name="RatedMaps">That team's rated maps then, carried over when the core moves to another team.</param>
+/// <param name="LastPlayedAt">That team's last rated map then, so a core that moves after time away decays for it.</param>
+public sealed record PlayerRating(int TeamId, double Offset, int CoreGeneration = 0, int RatedMaps = 0, DateTimeOffset? LastPlayedAt = null);

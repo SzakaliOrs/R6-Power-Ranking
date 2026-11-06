@@ -22,11 +22,13 @@ public static class RatingStateJson
 
     sealed record LeagueDocument(string Id, double Rating, double? EntryLevel, DateTimeOffset? EnteredAt);
 
+    // Fields added later default when an older checkpoint lacks them.
     sealed record TeamDocument(
         int Id, string League, double Offset, bool Seeded, int RatedMaps, int BoostMapsLeft,
-        DateTimeOffset? LastPlayedAt, int DecayPeriods, double? FrozenRating, List<int> Lineup);
+        DateTimeOffset? LastPlayedAt, int DecayPeriods, double? FrozenRating, List<int> Lineup, int CoreGeneration = 0);
 
-    sealed record PlayerDocument(int Id, int TeamId, double Offset);
+    sealed record PlayerDocument(int Id, int TeamId, double Offset, int CoreGeneration = 0, int RatedMaps = 0,
+        DateTimeOffset? LastPlayedAt = null);
 
     public static string Write(RatingState state) => JsonSerializer.Serialize(new StateDocument(
         state.FirstMapAt,
@@ -36,8 +38,10 @@ public static class RatingStateJson
             state.LeagueEntryLevels.TryGetValue(league.Key, out var level) ? level : null,
             state.LeagueEnteredAt.TryGetValue(league.Key, out var enteredAt) ? enteredAt : null))],
         [.. state.Teams.Values.Select(team => new TeamDocument(team.TeamId, team.League, team.Offset, team.Seeded,
-            team.RatedMaps, team.BoostMapsLeft, team.LastPlayedAt, team.DecayPeriods, team.FrozenRating, [.. team.Lineup]))],
-        [.. state.Players.Select(player => new PlayerDocument(player.Key, player.Value.TeamId, player.Value.Offset))]),
+            team.RatedMaps, team.BoostMapsLeft, team.LastPlayedAt, team.DecayPeriods, team.FrozenRating, [.. team.Lineup],
+            team.CoreGeneration))],
+        [.. state.Players.Select(player => new PlayerDocument(player.Key, player.Value.TeamId, player.Value.Offset,
+            player.Value.CoreGeneration, player.Value.RatedMaps, player.Value.LastPlayedAt))]),
         Options);
 
     public static RatingState Read(string json)
@@ -69,9 +73,11 @@ public static class RatingStateJson
             team.DecayPeriods = saved.DecayPeriods;
             team.FrozenRating = saved.FrozenRating;
             team.Lineup = saved.Lineup;
+            team.CoreGeneration = saved.CoreGeneration;
         }
         foreach (var player in document.Players)
-            state.SetPlayer(player.Id, new PlayerRating(player.TeamId, player.Offset));
+            state.SetPlayer(player.Id, new PlayerRating(player.TeamId, player.Offset, player.CoreGeneration, player.RatedMaps,
+                player.LastPlayedAt));
         return state;
     }
 }

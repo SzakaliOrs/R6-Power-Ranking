@@ -5,7 +5,8 @@ namespace Rankings.Core;
 /// K_reg; a map between two leagues moves their offsets with K_int and both league
 /// ratings with K_league. A BO3 or BO5 winner gets one extra update. Before a team's map
 /// the engine seeds it, brings it back from a freeze, decays it for inactivity and checks
-/// its lineup against its roster core. After each run every league's offsets are re-centred on zero.
+/// its lineup against its roster core. A rating belongs to a core: a team that signs another
+/// team's core takes over its rating. After each run every league's offsets are re-centred on zero.
 /// </summary>
 /// <param name="seasonStarts">When each top-level season starts; each one pulls every offset toward zero once.</param>
 public sealed class RatingEngine(RatingSettings settings, IEnumerable<DateTimeOffset>? seasonStarts = null)
@@ -71,7 +72,7 @@ public sealed class RatingEngine(RatingSettings settings, IEnumerable<DateTimeOf
 
         foreach (var team in teamsThatPlayed.Select(state.Team))
             foreach (var playerId in team.Lineup)
-                state.SetPlayer(playerId, new PlayerRating(team.TeamId, team.Offset));
+                state.SetPlayer(playerId, new PlayerRating(team.TeamId, team.Offset, team.CoreGeneration, team.RatedMaps, team.LastPlayedAt));
 
         return new RatingRun(ratedMaps, skipped, events);
     }
@@ -117,7 +118,8 @@ public sealed class RatingEngine(RatingSettings settings, IEnumerable<DateTimeOf
 
     /// <summary>
     /// Stops rating a relegated or disbanded team: its rating is kept as it stands, and its
-    /// players carry their last offsets into their next teams. It comes back if it plays again.
+    /// players carry their last offsets into their next teams (a team that signs its core takes
+    /// over the rating). It comes back if it plays again.
     /// </summary>
     public static void Freeze(RatingState state, int teamId)
     {
@@ -154,11 +156,18 @@ public sealed class RatingEngine(RatingSettings settings, IEnumerable<DateTimeOf
     {
         if (!team.Seeded)
         {
-            if (InNewLeague(state, team.League, playedAt))
-                StartLevel(team, lineup);
-            else
-                Seed(state, team, lineup);
-            events.Add(new RosterEvent(playedAt, team.TeamId, RosterEventKind.Seeded));
+            // A team that has played but has no rating lost its core to another team.
+            var kind = team.LastPlayedAt is null ? RosterEventKind.Seeded : RosterEventKind.NewCore;
+            // Asked even when the team takes over a core: a new league's first team sets the league's rating.
+            var inNewLeague = InNewLeague(state, team.League, playedAt);
+            if (!TakeOverCore(state, team, lineup, playedAt, events))
+            {
+                if (inNewLeague)
+                    StartLevel(team, lineup);
+                else
+                    Seed(state, team, lineup, playedAt);
+                events.Add(new RosterEvent(playedAt, team.TeamId, kind));
+            }
             NoteSharedCores(state, team, playedAt, events);
             return;
         }
@@ -185,9 +194,13 @@ public sealed class RatingEngine(RatingSettings settings, IEnumerable<DateTimeOf
         var playersKept = lineup.Count(team.Lineup.Contains);
         if (playersKept < Settings.RosterCoreSize)
         {
-            // Too few of the core stayed: a new team under the same ID, seeded from its players.
-            Seed(state, team, lineup);
-            events.Add(new RosterEvent(playedAt, team.TeamId, RosterEventKind.NewCore));
+            // Too few of the core stayed: a new team under the same ID, with the rating of the core
+            // it signed, if any, else seeded from its players.
+            if (!TakeOverCore(state, team, lineup, playedAt, events))
+            {
+                Seed(state, team, lineup, playedAt);
+                events.Add(new RosterEvent(playedAt, team.TeamId, RosterEventKind.NewCore));
+            }
             NoteSharedCores(state, team, playedAt, events);
             return;
         }
@@ -205,15 +218,18 @@ public sealed class RatingEngine(RatingSettings settings, IEnumerable<DateTimeOf
     }
 
     /// <summary>
-    /// Starting offset from the players: a share of each one's last offset, or the newcomer gap
-    /// below the league rating for a player with no rated history.
+    /// Starting offset from the players: a share of each one's last offset, decayed for the time
+    /// since that team last played as inactivity decay would have, or the newcomer gap below the
+    /// league rating for a player with no rated history.
     /// </summary>
-    void Seed(RatingState state, TeamRating team, IReadOnlyList<int> lineup)
+    void Seed(RatingState state, TeamRating team, IReadOnlyList<int> lineup, DateTimeOffset playedAt)
     {
         team.Offset = lineup.Count == 0
             ? -Settings.NewcomerGap
             : lineup.Average(playerId => state.Players.TryGetValue(playerId, out var lastRating)
-                ? Settings.SeedingShare * lastRating.Offset
+                ? Settings.SeedingShare * (lastRating.LastPlayedAt is { } lastPlayed
+                    ? Decayed(lastRating.Offset, DecayPeriodsAway(lastPlayed, playedAt))
+                    : lastRating.Offset)
                 : -Settings.NewcomerGap);
         team.Seeded = true;
         team.RatedMaps = 0;
@@ -221,6 +237,101 @@ public sealed class RatingEngine(RatingSettings settings, IEnumerable<DateTimeOf
         team.DecayPeriods = 0;
         team.FrozenRating = null;
         team.Lineup = lineup;
+        team.CoreGeneration++;
+    }
+
+    /// <summary>
+    /// When at least the core size of the lineup last played together in another team's core, the
+    /// team takes over that core's rating instead of being seeded: the rating follows the players
+    /// when an organisation signs another team's core. Each player not from that core pulls the
+    /// offset part-way toward the league average, as on a roster change, and the boost starts. A
+    /// team still holding the core loses it and has no rating until it plays again. A team that
+    /// carried on with a core of other players keeps its rating, and the lineup is seeded as usual.
+    /// </summary>
+    /// <returns>Whether the team took over a core.</returns>
+    bool TakeOverCore(RatingState state, TeamRating team, IReadOnlyList<int> lineup, DateTimeOffset playedAt, List<RosterEvent> events)
+    {
+        var movedCore = lineup
+            .Where(state.Players.ContainsKey)
+            .Select(playerId => (PlayerId: playerId, Record: state.Players[playerId]))
+            .Where(player => player.Record.TeamId != team.TeamId && state.Teams.ContainsKey(player.Record.TeamId))
+            .GroupBy(player => (player.Record.TeamId, player.Record.CoreGeneration))
+            .Where(group => group.Count() >= Settings.RosterCoreSize)
+            .OrderByDescending(group => group.Count())
+            .ThenBy(group => group.Key.TeamId)
+            .ThenByDescending(group => group.Key.CoreGeneration)
+            .FirstOrDefault();
+        if (movedCore is null)
+            return false;
+
+        var formerTeam = state.Team(movedCore.Key.TeamId);
+        double coreRating;
+        int coreRatedMaps;
+        if (movedCore.Key.CoreGeneration == formerTeam.CoreGeneration)
+        {
+            // Still the former team's core, unless it carried on without these players.
+            var corePlayers = movedCore.Select(player => player.PlayerId).ToHashSet();
+            if (formerTeam.Lineup.Count(corePlayers.Contains) < Settings.RosterCoreSize)
+                return false;
+            // A frozen core decays for the time away, as it would on returning to its own team.
+            if (formerTeam.IsFrozen)
+            {
+                formerTeam.Offset = formerTeam.FrozenRating!.Value - state.Leagues[formerTeam.League];
+                formerTeam.FrozenRating = null;
+            }
+            Decay(formerTeam, playedAt);
+            coreRating = state.Rating(formerTeam);
+            coreRatedMaps = formerTeam.RatedMaps;
+            LoseCore(formerTeam);
+            events.Add(new RosterEvent(playedAt, formerTeam.TeamId, RosterEventKind.CoreLost, OtherTeamId: team.TeamId));
+        }
+        else
+        {
+            // The former team has started a new core since: the players bring the rating they left
+            // with, decayed for the time since the core last played as a team would be.
+            var coreOffset = movedCore.Average(player => player.Record.Offset);
+            if (movedCore.Max(player => player.Record.LastPlayedAt) is { } corePlayedAt)
+                coreOffset = Decayed(coreOffset, DecayPeriodsAway(corePlayedAt, playedAt));
+            coreRating = state.Leagues[formerTeam.League] + coreOffset;
+            coreRatedMaps = movedCore.Max(player => player.Record.RatedMaps);
+        }
+
+        // Rating, not offset, so a core that moves to another league keeps its strength.
+        var newPlayers = lineup.Count - movedCore.Count();
+        team.Offset = (coreRating - state.Leagues[team.League]) * Math.Pow(1 - Settings.NewPlayerPull, newPlayers);
+        team.Seeded = true;
+        team.RatedMaps = coreRatedMaps;
+        team.BoostMapsLeft = Settings.RosterChangeBoostMaps;
+        team.DecayPeriods = 0;
+        team.FrozenRating = null;
+        team.Lineup = lineup;
+        team.CoreGeneration++;
+
+        // The core's rating lives here now. Its other players (a provider can list six) point here
+        // too, so no second team that signs some of them takes the same rating over again.
+        var holder = new PlayerRating(team.TeamId, team.Offset, team.CoreGeneration, team.RatedMaps, playedAt);
+        var formerCorePlayers = state.Players
+            .Where(player => player.Value.TeamId == formerTeam.TeamId && player.Value.CoreGeneration == movedCore.Key.CoreGeneration)
+            .Select(player => player.Key)
+            .ToList();
+        foreach (var playerId in formerCorePlayers)
+            state.SetPlayer(playerId, holder);
+
+        events.Add(new RosterEvent(playedAt, team.TeamId, RosterEventKind.TookOverCore, newPlayers, formerTeam.TeamId));
+        return true;
+    }
+
+    /// <summary>
+    /// The team's core went to another team, which took the rating: the team leaves the ranking
+    /// and its league's average, and is seeded from its players when it plays again.
+    /// </summary>
+    static void LoseCore(TeamRating team)
+    {
+        team.Seeded = false;
+        team.FrozenRating = null;
+        team.BoostMapsLeft = 0;
+        team.Lineup = [];
+        team.CoreGeneration++;
     }
 
     /// <summary>
@@ -262,6 +373,7 @@ public sealed class RatingEngine(RatingSettings settings, IEnumerable<DateTimeOf
         team.DecayPeriods = 0;
         team.FrozenRating = null;
         team.Lineup = lineup;
+        team.CoreGeneration++;
     }
 
     /// <summary>
@@ -288,16 +400,26 @@ public sealed class RatingEngine(RatingSettings settings, IEnumerable<DateTimeOf
     {
         if (team.LastPlayedAt is not { } lastPlayed)
             return;
-        var daysPastThreshold = (asOf - lastPlayed).TotalDays - Settings.InactivityThresholdDays;
-        if (daysPastThreshold <= 0)
-            return;
-        var periodsAway = (int)Math.Ceiling(daysPastThreshold / Settings.InactivityDecayPeriodDays);
+        var periodsAway = DecayPeriodsAway(lastPlayed, asOf);
         var periodsToApply = periodsAway - team.DecayPeriods;
         if (periodsToApply <= 0)
             return;
-        var newcomerOffset = -Settings.NewcomerGap;
-        team.Offset = newcomerOffset + (team.Offset - newcomerOffset) * Math.Pow(1 - Settings.InactivityDecay, periodsToApply);
+        team.Offset = Decayed(team.Offset, periodsToApply);
         team.DecayPeriods = periodsAway;
+    }
+
+    /// <summary>Decay periods started between <paramref name="lastPlayed"/> and <paramref name="asOf"/>, past the threshold.</summary>
+    int DecayPeriodsAway(DateTimeOffset lastPlayed, DateTimeOffset asOf)
+    {
+        var daysPastThreshold = (asOf - lastPlayed).TotalDays - Settings.InactivityThresholdDays;
+        return daysPastThreshold <= 0 ? 0 : (int)Math.Ceiling(daysPastThreshold / Settings.InactivityDecayPeriodDays);
+    }
+
+    /// <summary>The offset after <paramref name="periods"/> decay periods, each closing a share of the gap to the newcomer level.</summary>
+    double Decayed(double offset, int periods)
+    {
+        var newcomerOffset = -Settings.NewcomerGap;
+        return newcomerOffset + (offset - newcomerOffset) * Math.Pow(1 - Settings.InactivityDecay, periods);
     }
 
     /// <summary>Applies every season start up to <paramref name="asOf"/> not applied yet.</summary>
@@ -381,7 +503,10 @@ public enum RosterEventKind
 {
     /// <summary>A new team got its starting offset from its players.</summary>
     Seeded,
-    /// <summary>Fewer than the core size stayed, so the team was seeded again as a new core.</summary>
+    /// <summary>
+    /// Fewer than the core size stayed, so the team was seeded again as a new core; or a team that
+    /// lost its core to another team was seeded from its new players.
+    /// </summary>
     NewCore,
     /// <summary>The core stayed and new players joined: offset pulled, boost started.</summary>
     RosterChange,
@@ -389,8 +514,15 @@ public enum RosterEventKind
     Returned,
     /// <summary>A newly seeded lineup holds the core of <see cref="RosterEvent.OtherTeamId"/>.</summary>
     SharesCore,
+    /// <summary>The team signed the core of <see cref="RosterEvent.OtherTeamId"/> and took over its rating.</summary>
+    TookOverCore,
+    /// <summary>
+    /// <see cref="RosterEvent.OtherTeamId"/> took over the team's core and rating; the team is
+    /// unrated until it plays again.
+    /// </summary>
+    CoreLost,
 }
 
-/// <param name="NewPlayers">Players new to the core, on a roster change.</param>
-/// <param name="OtherTeamId">The team whose core it shares.</param>
+/// <param name="NewPlayers">Players new to the core, on a roster change or a core takeover.</param>
+/// <param name="OtherTeamId">The team whose core it shares, took over, or that took its core.</param>
 public sealed record RosterEvent(DateTimeOffset At, int TeamId, RosterEventKind Kind, int NewPlayers = 0, int? OtherTeamId = null);

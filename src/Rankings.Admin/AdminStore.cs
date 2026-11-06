@@ -231,7 +231,11 @@ public sealed class AdminStore(string databasePath)
         return wasRated;
     }
 
-    /// <summary>Points a provider key at a team, e.g. a rebrand or a core that moved to another organisation.</summary>
+    /// <summary>
+    /// Points a provider key at a team, e.g. after a rebrand. Not for a core that moved to another
+    /// organisation: the link has no date, so a full recalculation would move the key's whole
+    /// history; the engine carries the core's rating to its new team by itself.
+    /// </summary>
     public void LinkTeam(string providerKey, int teamId)
     {
         using var db = Open();
