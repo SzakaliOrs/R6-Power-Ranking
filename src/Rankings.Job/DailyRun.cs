@@ -10,7 +10,7 @@ public sealed record DailyRunOptions
     /// <summary>liquipedia or synthetic; a database is only ever rated from one of them.</summary>
     public required string DataSource { get; init; }
 
-    /// <summary>Days before yesterday fetched again in every run, for results that arrive late.</summary>
+    /// <summary>Days before yesterday fetched again in every run, for results that arrive late; the oldest settles.</summary>
     public int LookbackDays { get; init; } = 2;
 
     /// <summary>Rebuild every rating from the archive instead of carrying on from the last settled day.</summary>
@@ -54,9 +54,11 @@ public sealed record DailyRunSummary(
 }
 
 /// <summary>
-/// One daily run. It fetches yesterday and the <see cref="DailyRunOptions.LookbackDays"/> days
-/// before it, archives them, then rates from the day after the last settled day through
-/// yesterday. The oldest day of the lookback window will never be fetched again, so it becomes
+/// One daily run. It fetches everything up to the run's start time: yesterday, the
+/// <see cref="DailyRunOptions.LookbackDays"/> days before it and the run day so far. It archives
+/// them, then rates from the day after the last settled day through the run day, whose snapshot
+/// the next run replaces with the whole day. The oldest day of the lookback window will never be
+/// fetched again, so it becomes
 /// the new settled day: the rating state at its end is saved as the checkpoint and its maps
 /// leave the maps table. The newer days are rated again by the next run, with whatever arrived
 /// late. A full recalculation runs the same days through the same code from an empty state, so
@@ -78,7 +80,10 @@ public sealed class DailyRun(
     {
         var store = new RatingsStore(db);
         store.CheckDataSource(options.DataSource);
-        var yesterday = RatingsStore.DayOf(_time.GetUtcNow()).AddDays(-1);
+        // Matches are fetched and rated up to the moment the run starts.
+        var startedAt = _time.GetUtcNow();
+        var today = RatingsStore.DayOf(startedAt);
+        var yesterday = today.AddDays(-1);
         if (yesterday < options.EarliestDay)
             throw new DailyRunException($"Yesterday ({yesterday:yyyy-MM-dd}) is before {options.EarliestDay:yyyy-MM-dd}; there is nothing to rate.");
 
@@ -104,7 +109,7 @@ public sealed class DailyRun(
         IReadOnlyList<DateOnly> missingDays = [];
         ImportSummary fetched;
         if (options.Full && options.FetchWholeHistory)
-            fetched = await import.FetchAsync(source, options.EarliestDay, yesterday, cancellationToken);
+            fetched = await import.FetchAsync(source, options.EarliestDay, today, cancellationToken, until: startedAt);
         else
         {
             // Older days first, so players are numbered in the order they first played.
@@ -115,11 +120,11 @@ public sealed class DailyRun(
                 (reparsedDays, missingDays) = (reparsed.Days, reparsed.MissingDays ?? []);
             }
             else if (!options.Full)
-                reparsedDays = await ReparseNewlyAssignedAsync(store, import, fetchFrom, yesterday, cancellationToken);
-            if (fetchFrom <= yesterday)
-                log?.Invoke($"Fetching {fetchFrom:yyyy-MM-dd}..{yesterday:yyyy-MM-dd} from the source.");
-            fetched = fetchFrom <= yesterday
-                ? await import.FetchAsync(source, fetchFrom, yesterday, cancellationToken)
+                reparsedDays = await ReparseNewlyAssignedAsync(store, import, fetchFrom, today, cancellationToken);
+            if (fetchFrom <= today)
+                log?.Invoke($"Fetching {fetchFrom:yyyy-MM-dd} 00:00..{startedAt:yyyy-MM-dd HH:mm:ss} UTC from the source.");
+            fetched = fetchFrom <= today
+                ? await import.FetchAsync(source, fetchFrom, today, cancellationToken, until: startedAt)
                 : new ImportSummary(0, 0, 0, new ProviderIds(db).UnassignedTeams().Count);
             log?.Invoke($"Fetched {fetched.Maps} map(s), {fetched.Skipped} skipped.");
         }
@@ -128,8 +133,8 @@ public sealed class DailyRun(
         var ratedFrom = settled?.AddDays(1)
             ?? Min(maps.Count > 0 ? RatingsStore.DayOf(maps[0].PlayedAt) : fetchFrom, fetchFrom);
         var lateMaps = maps.Count(map => RatingsStore.DayOf(map.PlayedAt) < ratedFrom);
-        if (ratedFrom > yesterday)
-            return new DailyRunSummary(null, yesterday, settled, fetched.Maps, 0, fetched.Skipped, fetched.UnassignedTeams,
+        if (ratedFrom > today)
+            return new DailyRunSummary(null, today, settled, fetched.Maps, 0, fetched.Skipped, fetched.UnassignedTeams,
                 lateMaps, reparsedDays, missingDays) { RemovedTeams = removedTeams };
 
         var newSettled = yesterday.AddDays(-options.LookbackDays);
@@ -145,11 +150,11 @@ public sealed class DailyRun(
         var droppedTeams = store.DroppedTeams();
 
         var ratedMaps = 0;
-        log?.Invoke($"Rating {ratedFrom:yyyy-MM-dd}..{yesterday:yyyy-MM-dd} ({yesterday.DayNumber - ratedFrom.DayNumber + 1} day(s), {maps.Count} map(s) waiting).");
+        log?.Invoke($"Rating {ratedFrom:yyyy-MM-dd}..{today:yyyy-MM-dd} ({today.DayNumber - ratedFrom.DayNumber + 1} day(s), {maps.Count} map(s) waiting).");
         using (var tx = db.Connection.BeginTransaction())
         {
             store.ClearFrom(ratedFrom, tx);
-            for (var day = ratedFrom; day <= yesterday; day = day.AddDays(1))
+            for (var day = ratedFrom; day <= today; day = day.AddDays(1))
             {
                 var run = rater.RateDay(state, day, [.. mapsByDay[day]], leagues, teamLeagues, entryLevels, freezes[day], droppedTeams[day]);
                 var snapshot = Snapshots.Take(state, day, settings, previous, unrankedTeams.On(day));
@@ -162,16 +167,16 @@ public sealed class DailyRun(
                     settled = day;
                 }
                 // A line per finished month on long runs; a daily run's few days need none.
-                if (day.AddDays(1).Day == 1 && yesterday.DayNumber - ratedFrom.DayNumber > 31)
+                if (day.AddDays(1).Day == 1 && today.DayNumber - ratedFrom.DayNumber > 31)
                     log?.Invoke($"Rated through {day:yyyy-MM-dd}: {ratedMaps} map(s), {state.Teams.Count} team(s) so far.");
             }
             log?.Invoke("Saving the ratings.");
-            store.SaveCurrentRatings(state, yesterday, tx);
+            store.SaveCurrentRatings(state, today, tx);
             tx.Commit();
         }
-        log?.Invoke($"Rated {ratedMaps} map(s) through {yesterday:yyyy-MM-dd}.");
+        log?.Invoke($"Rated {ratedMaps} map(s) through {startedAt:yyyy-MM-dd HH:mm:ss} UTC.");
 
-        return new DailyRunSummary(ratedFrom, yesterday, settled, fetched.Maps, ratedMaps, fetched.Skipped,
+        return new DailyRunSummary(ratedFrom, today, settled, fetched.Maps, ratedMaps, fetched.Skipped,
             fetched.UnassignedTeams, lateMaps, reparsedDays, missingDays) { RemovedTeams = removedTeams };
     }
 

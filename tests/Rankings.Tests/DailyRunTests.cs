@@ -75,9 +75,10 @@ public sealed class DailyRunTests : IDisposable
         var recalculated = NewDatabase();
         await Runner(recalculated, new SimulatedMatchSource(World), clock).RunAsync(FullFromArchive);
 
-        var yesterday = new DateOnly(2026, 3, 8);
-        Assert.Equal(yesterday, last.RatedThrough);
-        Assert.Equal(yesterday.AddDays(-2), last.SettledThrough);
+        // The last run starts on 2026-03-09, rates that day so far and settles yesterday − 2.
+        var runDay = new DateOnly(2026, 3, 9);
+        Assert.Equal(runDay, last.RatedThrough);
+        Assert.Equal(runDay.AddDays(-3), last.SettledThrough);
         Assert.True(last.RatedMaps > 0, "the week has league maps");
         AssertSameRatings(daily, recalculated);
     }
@@ -102,6 +103,39 @@ public sealed class DailyRunTests : IDisposable
         Assert.True(weekMaps > 0);
         Assert.Equal(weekMaps, Convert.ToInt32(daily.Scalar(
             $"SELECT COUNT(*) FROM rated_maps WHERE played_at >= {Start(new DateOnly(2026, 3, 1))} AND played_at < {Start(settled.AddDays(1))}")));
+    }
+
+    [Fact]
+    public async Task ARun_RatesItsOwnDayUpToItsStartAndTheNextRunRatesTheWholeDay()
+    {
+        // The first day after the full start with series at two or more times, so a run can start between them.
+        var runDay = World.History.Maps
+            .Where(map => map.PlayedAt > FirstRunAt)
+            .GroupBy(map => RatingsStore.DayOf(map.PlayedAt))
+            .OrderBy(day => day.Key)
+            .First(day => day.Select(map => map.PlayedAt).Distinct().Count() >= 2);
+        var startedAt = runDay.Min(map => map.PlayedAt).AddMinutes(1);
+        var playedBeforeTheRun = runDay.Count(map => map.PlayedAt < startedAt);
+        var dayStart = Start(runDay.Key);
+        var dayEnd = Start(runDay.Key.AddDays(1));
+
+        var db = NewDatabase();
+        var clock = new FakeTimeProvider(FirstRunAt);
+        await Runner(db, new SimulatedMatchSource(World), clock).RunAsync(FullFromSimulation);
+        clock.SetUtcNow(startedAt);
+        var duringTheDay = await Runner(db, new SimulatedMatchSource(World), clock).RunAsync(Daily);
+
+        Assert.Equal(runDay.Key, duringTheDay.RatedThrough);
+        Assert.Equal(playedBeforeTheRun, Convert.ToInt32(db.Scalar(
+            $"SELECT COUNT(*) FROM rated_maps WHERE played_at >= {dayStart} AND played_at < {dayEnd}")));
+        Assert.Equal(runDay.Key.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture),
+            db.GetState(RatingsStore.RatedThroughKey));
+
+        clock.SetUtcNow(new DateTimeOffset(runDay.Key.AddDays(1).ToDateTime(new TimeOnly(4, 17)), TimeSpan.Zero));
+        await Runner(db, new SimulatedMatchSource(World), clock).RunAsync(Daily);
+
+        Assert.Equal(runDay.Count(), Convert.ToInt32(db.Scalar(
+            $"SELECT COUNT(*) FROM rated_maps WHERE played_at >= {dayStart} AND played_at < {dayEnd}")));
     }
 
     [Fact]
@@ -204,7 +238,8 @@ public sealed class DailyRunTests : IDisposable
         Assert.Equal(SampleSiteName(leader.GetProperty("id").GetInt32()), leader.GetProperty("name").GetString());
         using var meta = JsonDocument.Parse(File.ReadAllText(Path.Combine(_siteRoot, "meta.json")));
         Assert.Equal(Synthetic, meta.RootElement.GetProperty("dataSource").GetString());
-        Assert.Equal("2026-03-01", meta.RootElement.GetProperty("snapshotDate").GetString());
+        // The run day itself, rated up to the run's start.
+        Assert.Equal("2026-03-02", meta.RootElement.GetProperty("snapshotDate").GetString());
         using var teamView = JsonDocument.Parse(File.ReadAllText(Path.Combine(_siteRoot, "teams", $"{leader.GetProperty("id").GetInt32()}.json")));
         Assert.NotEmpty(teamView.RootElement.GetProperty("recent").EnumerateArray());
         Assert.False(string.IsNullOrEmpty(teamView.RootElement.GetProperty("recent")[0].GetProperty("tournament").GetString()));

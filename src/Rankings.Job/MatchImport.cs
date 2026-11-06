@@ -20,8 +20,9 @@ public sealed record ImportSummary(
 
 /// <summary>
 /// Gets maps into the database: fetched from the provider and archived first, or read back
-/// from the archive. Works on whole UTC days, so an archived day is always complete and a
-/// later fetch of the same day can simply replace it.
+/// from the archive. Works on whole UTC days, so a later fetch of the same day can simply replace
+/// its archive file. Only a daily run's own day is archived in part (up to the run's start); every
+/// run fetches that day again until it settles, so a settled day's file is always complete.
 /// </summary>
 public sealed class MatchImport(RankingsDb db, IReadOnlyList<IArchiveStore> archives, TimeProvider? time = null)
 {
@@ -30,9 +31,22 @@ public sealed class MatchImport(RankingsDb db, IReadOnlyList<IArchiveStore> arch
     readonly TimeProvider _time = time ?? TimeProvider.System;
 
     /// <summary>Fetches the days from..to inclusive, archives every day, then stores the maps.</summary>
-    public async Task<ImportSummary> FetchAsync(IMatchSource source, DateOnly from, DateOnly to, CancellationToken cancellationToken = default)
+    /// <param name="until">
+    /// Stops at this instant on <paramref name="to"/> instead of at its end, e.g. a daily run's start
+    /// time. That day's archive file then holds only what was played before it, until a later
+    /// fetch of the day replaces it.
+    /// </param>
+    public async Task<ImportSummary> FetchAsync(IMatchSource source, DateOnly from, DateOnly to,
+        CancellationToken cancellationToken = default, DateTimeOffset? until = null)
     {
-        var batch = await source.FetchAsync(StartOf(from), StartOf(to.AddDays(1)), cancellationToken);
+        var end = StartOf(to.AddDays(1));
+        if (until is { } stopAt)
+        {
+            if (stopAt < StartOf(to) || stopAt > end)
+                throw new ArgumentOutOfRangeException(nameof(until), stopAt, $"Must fall on {to:yyyy-MM-dd}.");
+            end = stopAt;
+        }
+        var batch = await source.FetchAsync(StartOf(from), end, cancellationToken);
         var days = LpdbArchive.SplitByDay(batch.Responses, from, to, _time.GetUtcNow());
 
         // The archive is the source of truth, so it is complete before the database changes.

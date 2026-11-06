@@ -13,7 +13,7 @@ dotnet run --project src/Rankings.Job -- <command> [options]
 
 | Command | What it does | Calls Liquipedia |
 |---|---|---|
-| `run [--source liquipedia\|synthetic] [--full]` | The daily run: fetches yesterday and the 2 days before, rates every day since the last settled one, writes the site's JSON (`--site-out`, default `web/public/data`). `--full` rebuilds every rating from the archive. | Yes, with `--source liquipedia` (the default) |
+| `run [--source liquipedia\|synthetic] [--full]` | The daily run: fetches the 3 days before the run and the run day up to its start time, rates every day since the last settled one through the run day, writes the site's JSON (`--site-out`, default `web/public/data`). `--full` rebuilds every rating from the archive. | Yes, with `--source liquipedia` (the default) |
 | `init-db <path>` | Creates an empty `rankings.db` with the current schema. Refuses to overwrite an existing file. | No |
 | `fetch --from D --to D` | Fetches finished maps for those UTC days, archives each day, stores the maps | Yes |
 | `backfill [--from D] [--to D] [--restart]` | Fetches a month at a time from 2023-01-01 (or `--from`) to yesterday, continuing where it stopped. It stops cleanly when the hourly budget is spent. | Yes |
@@ -36,16 +36,20 @@ answered with a rate limit.
 
 ## The daily run
 
-The site shows ratings through yesterday, but the last two days aren't final yet: Liquipedia can
-add a result a few hours late. So each run works like this:
+The site shows ratings up to the moment the run started, but the newest days aren't final yet:
+Liquipedia can add a result a few hours late, and the run day has only begun. So each run works
+like this:
 
-1. **Fetch** yesterday and the 2 days before it, archive each day (to B2 with `--b2`), and store the
-   maps. A settled day is never fetched again.
-2. **Rate** from the day after the last settled day through yesterday, one UTC day at a time with
-   `DailyRating`. Each day gets its snapshot, rated maps and roster events.
+1. **Fetch** everything from the day after the last settled day up to the run's start time:
+   yesterday, the 2 days before it, and the run day so far. Archive each day (to B2 with `--b2`)
+   and store the maps. The run day's archive file holds only the part before the run; the next
+   run fetches the whole day and replaces it. A settled day is never fetched again.
+2. **Rate** from the day after the last settled day through the run day, one UTC day at a time
+   with `DailyRating`. Each day gets its snapshot, rated maps and roster events.
 3. **Settle** the oldest day of the window (yesterday − 2): no later fetch can change it. The
    rating state at its end is saved exactly (`run_state.settled_state`), and its maps leave the
-   `maps` table, because B2 holds them. The two newer days are rated again by the next run.
+   `maps` table, because B2 holds them. The newer days, the run day included, are rated again by
+   the next run.
 4. **Export** the site's JSON from the database.
 
 A full recalculation (`--full`) clears everything it rebuilds, reads every archived day back (or,

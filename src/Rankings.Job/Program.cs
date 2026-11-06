@@ -16,8 +16,9 @@ const string Usage = """
       Rankings.Job sample-site [--seed N] [--out web/public/data]
 
     Dates are whole UTC days, both included; nothing before 2023-01-01 is fetched.
-    run is the daily run: it fetches yesterday and the 2 days before, rates every day since the
-    last settled one and writes the site's JSON; --full rebuilds every rating from the archive.
+    run is the daily run: it fetches the 3 days before the run and the run day up to its start,
+    rates every day since the last settled one through the run day and writes the site's JSON;
+    --full rebuilds every rating from the archive.
     upload-archive copies the local archive's real days (matches/...) to B2, skipping days B2 already has.
     fetch and backfill call Liquipedia; reparse only reads the archive; backtest --synthetic
     simulates its seasons and touches nothing; sample-site writes the site's JSON from synthetic seasons.
